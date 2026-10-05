@@ -4,3 +4,15 @@
 *.class
 *Test.java
 **/test/
+
+# 本地配置(含数据库密码/OSS密钥等敏感信息),不入库
+application-dev.yml
+
+# 微信支付等证书/密钥文件
+*.pem
+*.p12
+*.jks
+
+# 编辑器配置与日志
+.vscode/
+*.log

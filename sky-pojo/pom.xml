@@ -14,14 +14,20 @@
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
         </dependency>
+        <!-- Jackson 注解（@JsonFormat）：Jackson 3 中注解包名不变，版本由父 POM 统一管理 -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-            <version>2.9.2</version>
+            <artifactId>jackson-annotations</artifactId>
         </dependency>
+        <!-- Swagger v3 注解（@Schema 等），替代原 knife4j（springfox） -->
         <dependency>
-            <groupId>com.github.xiaoymin</groupId>
-            <artifactId>knife4j-spring-boot-starter</artifactId>
+            <groupId>io.swagger.core.v3</groupId>
+            <artifactId>swagger-annotations-jakarta</artifactId>
+        </dependency>
+        <!-- Spring 格式注解（@DateTimeFormat）：查询参数绑定用，版本由父 POM 统一管理 -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-context</artifactId>
         </dependency>
     </dependencies>
 </project>
