@@ -122,7 +122,7 @@ public class EmployeeServiceImpl implements EmployeeService {
 
     /**
      * 员工分页查询
-     * 
+     *
      * @param employeePageQueryDTO
      * @return
      */
@@ -143,7 +143,7 @@ public class EmployeeServiceImpl implements EmployeeService {
 
     /**
      * 启用禁用员工账号
-     * 
+     *
      * @param status
      * @param id
      */
@@ -158,6 +158,55 @@ public class EmployeeServiceImpl implements EmployeeService {
                 .updateUser(BaseContext.getCurrentId())
                 .build();
 
+        employeeMapper.update(employee);
+    }
+
+    /**
+     * 根据id查询员工
+     *
+     * @param id
+     * @return
+     */
+    @Override
+    public Employee getById(Long id) {
+        Employee employee = employeeMapper.getById(id);
+
+        // 回显页面不需要密码，且不应把密码摘要暴露给前端 → 置空
+        // ⚠ 必须先判空：查不存在的 id 时 employee 为 null，不判空直接 set 会 NPE（500）
+        if (employee != null) {
+            employee.setPassword(null);
+        }
+
+        return employee;
+    }
+
+    /**
+     * 编辑员工信息
+     *
+     * @param employeeDTO
+     */
+    @Override
+    public void update(EmployeeDTO employeeDTO) {
+        Employee employee = new Employee();
+
+        // 1. 显式搬运"编辑表单允许修改的字段"：id 用于定位记录，其余是表单内容
+        employee.setId(employeeDTO.getId());
+        employee.setUsername(employeeDTO.getUsername());
+        employee.setName(employeeDTO.getName());
+        employee.setPhone(employeeDTO.getPhone());
+        employee.setSex(employeeDTO.getSex());
+        employee.setIdNumber(employeeDTO.getIdNumber());
+
+        // 2. 刻意不设置 password / status / createTime / createUser——它们保持 null，
+        //    配合 XML 里动态 SQL 的 <if test="xxx != null">：null 字段不会出现在 update 语句里，库里原值保留。
+        //    ⚠ 经典翻车点：如果把 update 改成"全量字段"语句，password 会被 null 刷掉——编辑一次密码就没了
+        //    （EmployeeDTO 里本来也没有密码字段：编辑表单不提供改密功能）
+
+        // 3. 审计字段：记录"谁在什么时候改的"
+        employee.setUpdateTime(LocalDateTime.now());
+        employee.setUpdateUser(BaseContext.getCurrentId());
+
+        // 4. 复用通用动态更新 SQL（与启用禁用共用同一个 Mapper 方法/同一条 XML）
         employeeMapper.update(employee);
     }
 
