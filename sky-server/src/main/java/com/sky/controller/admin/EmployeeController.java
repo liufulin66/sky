@@ -38,9 +38,16 @@ public class EmployeeController {
         EmployeeLoginVO employeeLoginVO = employeeService.login(employeeLoginDTO);
         return Result.success(employeeLoginVO);
     }
-
+    /**
+     * 新增员工
+     * @param employeeDTO
+     * @return
+     */
     @PostMapping 
+    @Operation(summary = "新增员工")
     public Result save(@RequestBody EmployeeDTO employeeDTO){
-        return null;
+        log.info("新增员工：{}", employeeDTO.getUsername());
+        employeeService.save(employeeDTO);
+        return Result.success();
     }
 }

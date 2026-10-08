@@ -2,7 +2,9 @@ package com.sky.service.impl;
 
 import com.sky.constant.JwtClaimsConstant;
 import com.sky.constant.MessageConstant;
+import com.sky.constant.PasswordConstant;
 import com.sky.constant.StatusConstant;
+import com.sky.context.BaseContext;
 import com.sky.dto.EmployeeDTO;
 import com.sky.dto.EmployeeLoginDTO;
 import com.sky.entity.Employee;
@@ -10,8 +12,8 @@ import com.sky.exception.AccountLockedException;
 import com.sky.exception.AccountNotFoundException;
 import com.sky.exception.PasswordErrorException;
 import com.sky.mapper.EmployeeMapper;
-import com.sky.service.EmployeeService;
 import com.sky.properties.JwtProperties;
+import com.sky.service.EmployeeService;
 import com.sky.utils.JwtUtil;
 import com.sky.vo.EmployeeLoginVO;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,6 +21,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.DigestUtils;
 
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -77,15 +80,39 @@ public class EmployeeServiceImpl implements EmployeeService {
                 .name(employee.getName())
                 .token(token)
                 .build();
-    }   
+    }
 
     /**
      * 新增员工
+     *
      * @param employeeDTO
-     * @return
      */
     @Override
     public void save(EmployeeDTO employeeDTO) {
-        
+        Employee employee = new Employee();
+
+        // 1. 前端可控字段：显式逐个赋值
+        //    （等价于教程的 BeanUtils.copyProperties，但编译期可检查、不会把 DTO 里多余的字段悄悄带进来——
+        //     比如 DTO 里的 id：新增时主键由数据库自增生成，不应该赋值）
+        employee.setUsername(employeeDTO.getUsername());
+        employee.setName(employeeDTO.getName());
+        employee.setPhone(employeeDTO.getPhone());
+        employee.setSex(employeeDTO.getSex());
+        employee.setIdNumber(employeeDTO.getIdNumber());
+
+        // 2. 后端补齐字段：初始密码（默认密码 123456 的 MD5 摘要）、初始状态为启用
+        employee.setPassword(DigestUtils.md5DigestAsHex(
+                PasswordConstant.DEFAULT_PASSWORD.getBytes(StandardCharsets.UTF_8)));
+        employee.setStatus(StatusConstant.ENABLE);
+
+        // 3. 审计字段：当前时间 + 当前登录人 id（拦截器已把 id 存入 ThreadLocal，这里取出来用）
+        //    预告：这四行将来会被"公共字段自动填充"的 AOP 切面统一接管
+        employee.setCreateTime(LocalDateTime.now());
+        employee.setUpdateTime(LocalDateTime.now());
+        employee.setCreateUser(BaseContext.getCurrentId());
+        employee.setUpdateUser(BaseContext.getCurrentId());
+
+        // 4. 入库（username 唯一索引冲突会抛数据库异常，由全局异常处理器统一转成"用户名已存在"）
+        employeeMapper.insert(employee);
     }
 }
