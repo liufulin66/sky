@@ -3,6 +3,7 @@ package com.sky.controller.admin;
 import com.sky.dto.EmployeeDTO;
 import com.sky.dto.EmployeeLoginDTO;
 import com.sky.dto.EmployeePageQueryDTO;
+import com.sky.dto.PasswordEditDTO;
 import com.sky.entity.Employee;
 import com.sky.result.PageResult;
 import com.sky.result.Result;
@@ -104,12 +105,13 @@ public class EmployeeController {
 
     /**
      * 编辑员工信息
+     * 
      * @param employeeDTO
      * @return
      */
     @PutMapping
     @Operation(summary = "编辑员工信息")
-    public Result update(@RequestBody EmployeeDTO employeeDTO){
+    public Result update(@RequestBody EmployeeDTO employeeDTO) {
         log.info("编辑员工信息：{}", employeeDTO.getName());
         employeeService.update(employeeDTO);
         return Result.success();
@@ -129,4 +131,20 @@ public class EmployeeController {
         log.info("员工退出登录");
         return Result.success();
     }
+
+    /**
+     * 修改密码
+     *
+     * @param passwordEditDTO
+     * @return
+     */
+    @PutMapping("/editPassword")
+    @Operation(summary = "修改密码")
+    public Result editPassword(@RequestBody PasswordEditDTO passwordEditDTO) {
+        // ⚠ 不要像打印其他 DTO 那样把整个对象打进日志——这里面是明文的新旧密码！
+        log.info("修改密码，员工id：{}", passwordEditDTO.getEmpId());
+        employeeService.editPassword(passwordEditDTO);
+        return Result.success();
+    }
+
 }

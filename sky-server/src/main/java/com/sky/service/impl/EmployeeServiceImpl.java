@@ -10,9 +10,11 @@ import com.sky.context.BaseContext;
 import com.sky.dto.EmployeeDTO;
 import com.sky.dto.EmployeeLoginDTO;
 import com.sky.dto.EmployeePageQueryDTO;
+import com.sky.dto.PasswordEditDTO;
 import com.sky.entity.Employee;
 import com.sky.exception.AccountLockedException;
 import com.sky.exception.AccountNotFoundException;
+import com.sky.exception.PasswordEditFailedException;
 import com.sky.exception.PasswordErrorException;
 import com.sky.mapper.EmployeeMapper;
 import com.sky.properties.JwtProperties;
@@ -198,15 +200,47 @@ public class EmployeeServiceImpl implements EmployeeService {
         employee.setIdNumber(employeeDTO.getIdNumber());
 
         // 2. 刻意不设置 password / status / createTime / createUser——它们保持 null，
-        //    配合 XML 里动态 SQL 的 <if test="xxx != null">：null 字段不会出现在 update 语句里，库里原值保留。
-        //    ⚠ 经典翻车点：如果把 update 改成"全量字段"语句，password 会被 null 刷掉——编辑一次密码就没了
-        //    （EmployeeDTO 里本来也没有密码字段：编辑表单不提供改密功能）
+        // 配合 XML 里动态 SQL 的 <if test="xxx != null">：null 字段不会出现在 update 语句里，库里原值保留。
+        // ⚠ 经典翻车点：如果把 update 改成"全量字段"语句，password 会被 null 刷掉——编辑一次密码就没了
+        // （EmployeeDTO 里本来也没有密码字段：编辑表单不提供改密功能）
 
         // 3. 审计字段：记录"谁在什么时候改的"
         employee.setUpdateTime(LocalDateTime.now());
         employee.setUpdateUser(BaseContext.getCurrentId());
 
         // 4. 复用通用动态更新 SQL（与启用禁用共用同一个 Mapper 方法/同一条 XML）
+        employeeMapper.update(employee);
+    }
+
+    /**
+     * 修改密码
+     *
+     * @param passwordEditDTO
+     */
+    @Override
+    public void editPassword(PasswordEditDTO passwordEditDTO) {
+        // 1. 当前登录人 id 从 token（BaseContext）取，而不是用前端传的 empId（原因见下文）
+        Long empId = BaseContext.getCurrentId();
+
+        // 2. 校验原密码：查库拿"完整实体"（含密码摘要），和输入的旧密码摘要比对
+        Employee dbEmployee = employeeMapper.getById(empId);
+        if (dbEmployee == null) {
+            throw new AccountNotFoundException(MessageConstant.ACCOUNT_NOT_FOUND);
+        }
+
+        String oldMd5 = DigestUtils.md5DigestAsHex(passwordEditDTO.getOldPassword().getBytes(StandardCharsets.UTF_8));
+        if (!oldMd5.equals(dbEmployee.getPassword())) {
+            // 这个异常在 sky-common 里闲置很久了，今天终于上岗
+            throw new PasswordEditFailedException(MessageConstant.PASSWORD_EDIT_FAILED);
+        }
+
+        // 3. 新密码做 MD5 摘要，连同审计字段组装实体，复用动态更新 SQL
+        Employee employee = new Employee();
+        employee.setId(empId);
+        employee.setPassword(
+                DigestUtils.md5DigestAsHex(passwordEditDTO.getNewPassword().getBytes(StandardCharsets.UTF_8)));
+        employee.setUpdateTime(LocalDateTime.now());
+        employee.setUpdateUser(BaseContext.getCurrentId());
         employeeMapper.update(employee);
     }
 
