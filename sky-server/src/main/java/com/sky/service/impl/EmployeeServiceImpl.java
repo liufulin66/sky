@@ -96,8 +96,8 @@ public class EmployeeServiceImpl implements EmployeeService {
         Employee employee = new Employee();
 
         // 1. 前端可控字段：显式逐个赋值
-        //    （等价于教程的 BeanUtils.copyProperties，但编译期可检查、不会把 DTO 里多余的字段悄悄带进来——
-        //     比如 DTO 里的 id：新增时主键由数据库自增生成，不应该赋值）
+        // （等价于教程的 BeanUtils.copyProperties，但编译期可检查、不会把 DTO 里多余的字段悄悄带进来——
+        // 比如 DTO 里的 id：新增时主键由数据库自增生成，不应该赋值）
         employee.setUsername(employeeDTO.getUsername());
         employee.setName(employeeDTO.getName());
         employee.setPhone(employeeDTO.getPhone());
@@ -110,7 +110,7 @@ public class EmployeeServiceImpl implements EmployeeService {
         employee.setStatus(StatusConstant.ENABLE);
 
         // 3. 审计字段：当前时间 + 当前登录人 id（拦截器已把 id 存入 ThreadLocal，这里取出来用）
-        //    预告：这四行将来会被"公共字段自动填充"的 AOP 切面统一接管
+        // 预告：这四行将来会被"公共字段自动填充"的 AOP 切面统一接管
         employee.setCreateTime(LocalDateTime.now());
         employee.setUpdateTime(LocalDateTime.now());
         employee.setCreateUser(BaseContext.getCurrentId());
@@ -122,21 +122,43 @@ public class EmployeeServiceImpl implements EmployeeService {
 
     /**
      * 员工分页查询
+     * 
      * @param employeePageQueryDTO
      * @return
      */
     @Override
     public PageResult pageQuery(EmployeePageQueryDTO employeePageQueryDTO) {
         // 1. PageHelper 设置分页参数（当前页、每页条数）
-        //    参数被存入 ThreadLocal，只对"紧接着的下一条 MyBatis 查询"生效，用完即清
+        // 参数被存入 ThreadLocal，只对"紧接着的下一条 MyBatis 查询"生效，用完即清
         PageHelper.startPage(employeePageQueryDTO.getPage(), employeePageQueryDTO.getPageSize());
 
         // 2. 执行查询：SQL 在 EmployeeMapper.xml 里（没有写 LIMIT）——
-        //    PageHelper 的 MyBatis 拦截器会自动改写 SQL 追加 LIMIT，并额外执行一条 count 查询统计总数
-        //    返回对象实际是 Page 类型（List 的子类），额外携带 total
+        // PageHelper 的 MyBatis 拦截器会自动改写 SQL 追加 LIMIT，并额外执行一条 count 查询统计总数
+        // 返回对象实际是 Page 类型（List 的子类），额外携带 total
         Page<Employee> page = employeeMapper.pageQuery(employeePageQueryDTO);
 
         // 3. 转换为对外的 PageResult，隔离第三方框架类型
         return new PageResult(page.getTotal(), page.getResult());
     }
+
+    /**
+     * 启用禁用员工账号
+     * 
+     * @param status
+     * @param id
+     */
+    @Override
+    public void startOrStop(Integer status, Long id) {
+        // 只携带"主键 + 要改的字段 + 审计字段"，其余保持 null，
+        // 与 Mapper 的动态 SQL <if test="xxx != null"> 配合：只更新非空字段
+        Employee employee = Employee.builder()
+                .id(id)
+                .status(status)
+                .updateTime(LocalDateTime.now())
+                .updateUser(BaseContext.getCurrentId())
+                .build();
+
+        employeeMapper.update(employee);
+    }
+
 }
