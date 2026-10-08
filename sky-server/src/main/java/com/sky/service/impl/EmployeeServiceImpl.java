@@ -3,6 +3,7 @@ package com.sky.service.impl;
 import com.sky.constant.JwtClaimsConstant;
 import com.sky.constant.MessageConstant;
 import com.sky.constant.StatusConstant;
+import com.sky.dto.EmployeeDTO;
 import com.sky.dto.EmployeeLoginDTO;
 import com.sky.entity.Employee;
 import com.sky.exception.AccountLockedException;
@@ -76,5 +77,15 @@ public class EmployeeServiceImpl implements EmployeeService {
                 .name(employee.getName())
                 .token(token)
                 .build();
+    }   
+
+    /**
+     * 新增员工
+     * @param employeeDTO
+     * @return
+     */
+    @Override
+    public void save(EmployeeDTO employeeDTO) {
+        
     }
 }
