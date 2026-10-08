@@ -1,5 +1,7 @@
 package com.sky.service.impl;
 
+import com.github.pagehelper.Page;
+import com.github.pagehelper.PageHelper;
 import com.sky.constant.JwtClaimsConstant;
 import com.sky.constant.MessageConstant;
 import com.sky.constant.PasswordConstant;
@@ -7,12 +9,14 @@ import com.sky.constant.StatusConstant;
 import com.sky.context.BaseContext;
 import com.sky.dto.EmployeeDTO;
 import com.sky.dto.EmployeeLoginDTO;
+import com.sky.dto.EmployeePageQueryDTO;
 import com.sky.entity.Employee;
 import com.sky.exception.AccountLockedException;
 import com.sky.exception.AccountNotFoundException;
 import com.sky.exception.PasswordErrorException;
 import com.sky.mapper.EmployeeMapper;
 import com.sky.properties.JwtProperties;
+import com.sky.result.PageResult;
 import com.sky.service.EmployeeService;
 import com.sky.utils.JwtUtil;
 import com.sky.vo.EmployeeLoginVO;
@@ -114,5 +118,25 @@ public class EmployeeServiceImpl implements EmployeeService {
 
         // 4. 入库（username 唯一索引冲突会抛数据库异常，由全局异常处理器统一转成"用户名已存在"）
         employeeMapper.insert(employee);
+    }
+
+    /**
+     * 员工分页查询
+     * @param employeePageQueryDTO
+     * @return
+     */
+    @Override
+    public PageResult pageQuery(EmployeePageQueryDTO employeePageQueryDTO) {
+        // 1. PageHelper 设置分页参数（当前页、每页条数）
+        //    参数被存入 ThreadLocal，只对"紧接着的下一条 MyBatis 查询"生效，用完即清
+        PageHelper.startPage(employeePageQueryDTO.getPage(), employeePageQueryDTO.getPageSize());
+
+        // 2. 执行查询：SQL 在 EmployeeMapper.xml 里（没有写 LIMIT）——
+        //    PageHelper 的 MyBatis 拦截器会自动改写 SQL 追加 LIMIT，并额外执行一条 count 查询统计总数
+        //    返回对象实际是 Page 类型（List 的子类），额外携带 total
+        Page<Employee> page = employeeMapper.pageQuery(employeePageQueryDTO);
+
+        // 3. 转换为对外的 PageResult，隔离第三方框架类型
+        return new PageResult(page.getTotal(), page.getResult());
     }
 }
