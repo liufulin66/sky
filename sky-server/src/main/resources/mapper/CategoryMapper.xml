@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.sky.mapper.CategoryMapper">
+
+    <!--
+        分类分页查询：name 模糊匹配、type 精确匹配，两个条件都可选
+        注意：SQL 里没有写 LIMIT —— 物理分页由 PageHelper 拦截器自动改写实现
+        排序：sort 是运营设置的展示顺序（数字小的靠前），create_time 作为同序时的二级排序保证结果稳定
+    -->
+    <select id="pageQuery" resultType="com.sky.entity.Category">
+        select * from category
+        <where>
+            <if test="name != null and name != ''">
+                and name like concat('%', #{name}, '%')
+            </if>
+            <if test="type != null">
+                and type = #{type}
+            </if>
+        </where>
+        order by sort asc, create_time desc
+    </select>
+
+    <!--
+        通用动态更新：只更新非空字段。
+        「启用禁用」只传 id+status；「修改分类」传 id+type+name+sort——两个功能共用这一条 SQL。
+        <set> 标签的职责：自动拼 SET 关键字、自动去掉最后一个多余的逗号
+    -->
+    <update id="update" parameterType="com.sky.entity.Category">
+        update category
+        <set>
+            <if test="type != null">type = #{type},</if>
+            <if test="name != null">name = #{name},</if>
+            <if test="sort != null">sort = #{sort},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+            <if test="updateUser != null">update_user = #{updateUser},</if>
+        </set>
+        where id = #{id}
+    </update>
+
+    <!--
+        按条件查询分类：type/status 都是可选条件
+        管理端传 type；用户端将来传 type + status=1（只返回启用的分类），同一条 SQL 复用
+    -->
+    <select id="list" resultType="com.sky.entity.Category">
+        select * from category
+        <where>
+            <if test="type != null">
+                and type = #{type}
+            </if>
+            <if test="status != null">
+                and status = #{status}
+            </if>
+        </where>
+        order by sort asc, create_time desc
+    </select>
+
+</mapper>

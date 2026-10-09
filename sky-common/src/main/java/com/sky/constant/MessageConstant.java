@@ -28,4 +28,7 @@ public class MessageConstant {
 
     public static final String ALREADY_EXISTS = "用户名已存在";
 
+    // 分类名称重复的提示（category.name 上有唯一索引 idx_category_name）
+    public static final String CATEGORY_ALREADY_EXISTS = "分类名称已存在";
+
 }
