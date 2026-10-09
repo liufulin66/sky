@@ -4,6 +4,10 @@ import com.aliyun.sdk.service.oss2.OSSClient;
 import com.aliyun.sdk.service.oss2.credentials.StaticCredentialsProvider;
 import com.aliyun.sdk.service.oss2.models.PutObjectRequest;
 import com.aliyun.sdk.service.oss2.transport.BinaryData;
+import com.sky.constant.MessageConstant;
+import com.sky.exception.BaseException;
+//import com.sky.constant.MessageConstant;
+
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -17,6 +21,7 @@ import lombok.extern.slf4j.Slf4j;
 public class AliOssUtil {
 
     private String endpoint;
+    private String region; // ← 挪到这里
     private String accessKeyId;
     private String accessKeySecret;
     private String bucketName;
@@ -34,8 +39,10 @@ public class AliOssUtil {
         String normalizedEndpoint = endpoint.startsWith("http") ? endpoint : "https://" + endpoint;
 
         // 创建 OSSClient 实例(V2 客户端实现了 AutoCloseable, 用 try-with-resources 自动释放)
+
         try (OSSClient ossClient = OSSClient.newBuilder()
                 .credentialsProvider(new StaticCredentialsProvider(accessKeyId, accessKeySecret))
+                .region(region)
                 .endpoint(normalizedEndpoint)
                 .build()) {
 
@@ -47,14 +54,16 @@ public class AliOssUtil {
                     .build());
         } catch (Exception e) {
             log.error("OSS 文件上传失败", e);
+            // throw new BaseException(MessageConstant.UPLOAD_FAILED);
         }
 
-        //文件访问路径规则 https://BucketName.Endpoint/ObjectName
+        // 文件访问路径规则 https://BucketName.Endpoint/ObjectName
+        String host = endpoint.replaceFirst("^https?://", "");
         StringBuilder stringBuilder = new StringBuilder("https://");
         stringBuilder
                 .append(bucketName)
                 .append(".")
-                .append(endpoint)
+                .append(host)
                 .append("/")
                 .append(objectName);
 
