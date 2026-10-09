@@ -2,6 +2,7 @@ package com.sky.service.impl;
 
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
+import com.sky.aspect.AutoFillAspect;
 import com.sky.constant.JwtClaimsConstant;
 import com.sky.constant.MessageConstant;
 import com.sky.constant.PasswordConstant;
@@ -27,18 +28,23 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.DigestUtils;
 
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
 
 @Service
 public class EmployeeServiceImpl implements EmployeeService {
 
+    private final AutoFillAspect autoFillAspect;
+
     @Autowired
     private EmployeeMapper employeeMapper;
 
     @Autowired
     private JwtProperties jwtProperties;
+
+    EmployeeServiceImpl(AutoFillAspect autoFillAspect) {
+        this.autoFillAspect = autoFillAspect;
+    }
 
     /**
      * 员工登录
@@ -111,12 +117,7 @@ public class EmployeeServiceImpl implements EmployeeService {
                 PasswordConstant.DEFAULT_PASSWORD.getBytes(StandardCharsets.UTF_8)));
         employee.setStatus(StatusConstant.ENABLE);
 
-        // 3. 审计字段：当前时间 + 当前登录人 id（拦截器已把 id 存入 ThreadLocal，这里取出来用）
-        // 预告：这四行将来会被"公共字段自动填充"的 AOP 切面统一接管
-        employee.setCreateTime(LocalDateTime.now());
-        employee.setUpdateTime(LocalDateTime.now());
-        employee.setCreateUser(BaseContext.getCurrentId());
-        employee.setUpdateUser(BaseContext.getCurrentId());
+        //审计字段游@AutoFill切面填充
 
         // 4. 入库（username 唯一索引冲突会抛数据库异常，由全局异常处理器统一转成"用户名已存在"）
         employeeMapper.insert(employee);
@@ -156,8 +157,6 @@ public class EmployeeServiceImpl implements EmployeeService {
         Employee employee = Employee.builder()
                 .id(id)
                 .status(status)
-                .updateTime(LocalDateTime.now())
-                .updateUser(BaseContext.getCurrentId())
                 .build();
 
         employeeMapper.update(employee);
@@ -204,9 +203,7 @@ public class EmployeeServiceImpl implements EmployeeService {
         // ⚠ 经典翻车点：如果把 update 改成"全量字段"语句，password 会被 null 刷掉——编辑一次密码就没了
         // （EmployeeDTO 里本来也没有密码字段：编辑表单不提供改密功能）
 
-        // 3. 审计字段：记录"谁在什么时候改的"
-        employee.setUpdateTime(LocalDateTime.now());
-        employee.setUpdateUser(BaseContext.getCurrentId());
+        
 
         // 4. 复用通用动态更新 SQL（与启用禁用共用同一个 Mapper 方法/同一条 XML）
         employeeMapper.update(employee);
@@ -239,8 +236,7 @@ public class EmployeeServiceImpl implements EmployeeService {
         employee.setId(empId);
         employee.setPassword(
                 DigestUtils.md5DigestAsHex(passwordEditDTO.getNewPassword().getBytes(StandardCharsets.UTF_8)));
-        employee.setUpdateTime(LocalDateTime.now());
-        employee.setUpdateUser(BaseContext.getCurrentId());
+        
         employeeMapper.update(employee);
     }
 

@@ -4,7 +4,6 @@ import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
 import com.sky.constant.MessageConstant;
 import com.sky.constant.StatusConstant;
-import com.sky.context.BaseContext;
 import com.sky.dto.CategoryDTO;
 import com.sky.dto.CategoryPageQueryDTO;
 import com.sky.entity.Category;
@@ -17,7 +16,6 @@ import com.sky.service.CategoryService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -49,11 +47,7 @@ public class CategoryServiceImpl implements CategoryService {
         // 2. 后端补齐字段：新分类默认启用（CategoryDTO 里根本没有 status 字段）
         category.setStatus(StatusConstant.ENABLE);
 
-        // 3. 审计字段（预告：这四行将来会被"公共字段自动填充"的 AOP 切面统一接管）
-        category.setCreateTime(LocalDateTime.now());
-        category.setUpdateTime(LocalDateTime.now());
-        category.setCreateUser(BaseContext.getCurrentId());
-        category.setUpdateUser(BaseContext.getCurrentId());
+        
 
         // 4. 入库（name 唯一索引冲突会抛数据库异常，由全局异常处理器按索引名转成"分类名称已存在"）
         categoryMapper.insert(category);
@@ -85,8 +79,6 @@ public class CategoryServiceImpl implements CategoryService {
         Category category = Category.builder()
                 .id(id)
                 .status(status)
-                .updateTime(LocalDateTime.now())
-                .updateUser(BaseContext.getCurrentId())
                 .build();
 
         categoryMapper.update(category);
@@ -107,11 +99,7 @@ public class CategoryServiceImpl implements CategoryService {
         category.setName(categoryDTO.getName());
         category.setSort(categoryDTO.getSort());
 
-        // 2. 刻意不设置 status：DTO 里没有该字段，保持 null，
-        // 动态 SQL 的 <if test="status != null"> 会跳过它 → 修改分类不会误改启用状态
-        category.setUpdateTime(LocalDateTime.now());
-        category.setUpdateUser(BaseContext.getCurrentId());
-
+        
         // 3. 复用与"启用禁用"同一条动态更新 SQL
         categoryMapper.update(category);
     }
