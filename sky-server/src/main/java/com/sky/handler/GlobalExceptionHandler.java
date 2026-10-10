@@ -31,11 +31,11 @@ public class GlobalExceptionHandler {
      * 原始的 SQLIntegrityConstraintViolationException，
      * 或已被 MyBatis-Spring 持久层异常翻译机制转换后的 DuplicateKeyException
      */
-    @ExceptionHandler({SQLIntegrityConstraintViolationException.class, DuplicateKeyException.class})
+    @ExceptionHandler({ SQLIntegrityConstraintViolationException.class, DuplicateKeyException.class })
     public Result<String> handleDuplicateKey(Exception ex) {
         // MySQL 驱动报错信息形如（不同版本带的索引名不同，但都包含索引名本身）：
-        //   Duplicate entry 'admin' for key 'employee.idx_username'
-        //   Duplicate entry '川菜' for key 'category.idx_category_name'
+        // Duplicate entry 'admin' for key 'employee.idx_username'
+        // Duplicate entry '川菜' for key 'category.idx_category_name'
         String message = ex.getMessage();
         if (message != null && message.contains("Duplicate entry")) {
             // 提取单引号之间的重复值（即冲突的那条数据值）
@@ -46,6 +46,10 @@ public class GlobalExceptionHandler {
             // 报错串里带着冲突的唯一索引名——按索引分流文案，避免"分类重名"提示成"用户名已存在"
             if (message.contains("idx_category_name")) {
                 return Result.error(MessageConstant.CATEGORY_ALREADY_EXISTS);
+            }
+
+            if (message.contains("idx_dish_name")) {
+                return Result.error(MessageConstant.DISH_ALREADY_EXISTS);
             }
 
             // 其余（员工表 idx_username 等）沿用原文案
