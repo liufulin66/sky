@@ -9,4 +9,25 @@
         </foreach>
     </select>
 
+    <!--
+        批量插入：<foreach> 把 List 循环拼接成
+        insert into setmeal_dish (setmeal_id, dish_id, name, price, copies) values (?,?,?,?,?),(?,?,?,?,?)
+        一次 SQL 插入 n 条，比循环 n 次 insert 少 n 次数据库往返
+        其中 name / price 是"下单快照"式的冗余字段，前端选菜时带过来
+    -->
+    <insert id="insertBatch">
+        insert into setmeal_dish (setmeal_id, dish_id, name, price, copies) values
+        <foreach collection="setmealDishes" item="setmealDish" separator=",">
+            (#{setmealDish.setmealId}, #{setmealDish.dishId}, #{setmealDish.name}, #{setmealDish.price}, #{setmealDish.copies})
+        </foreach>
+    </insert>
+
+    <!-- 按套餐id批量删除关系：where setmeal_id in (1,2,3) -->
+    <delete id="deleteBySetmealIds">
+        delete from setmeal_dish where setmeal_id in
+        <foreach collection="setmealIds" item="setmealId" separator="," open="(" close=")">
+            #{setmealId}
+        </foreach>
+    </delete>
+
 </mapper>

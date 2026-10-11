@@ -65,4 +65,10 @@
         order by create_time desc
     </select>
 
+    <!-- 根据套餐id查关联菜品（套餐起售前校验菜品状态用）：dish 与 setmeal_dish 联查 -->
+    <select id="getBySetmealId" resultType="com.sky.entity.Dish">
+        select d.* from dish d left join setmeal_dish sd on d.id = sd.dish_id
+        where sd.setmeal_id = #{setmealId}
+    </select>
+
 </mapper>

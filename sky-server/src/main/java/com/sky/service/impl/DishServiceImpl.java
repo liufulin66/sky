@@ -136,7 +136,7 @@ public class DishServiceImpl implements DishService {
         dish.setImage(dishDTO.getImage());
         dish.setDescription(dishDTO.getDescription());
         dishMapper.update(dish);   // 审计字段由 @AutoFill(UPDATE) 切面填充
-
+                                      
         // 2. 口味"先删后插"：前端提交的就是完整口味列表，整体替换最简单可靠
         //    （dish_flavor.id 会变，但该表不被任何外部数据引用，无副作用）
         dishFlavorMapper.deleteByDishIds(Collections.singletonList(dishDTO.getId()));

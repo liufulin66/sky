@@ -80,5 +80,15 @@ public interface DishMapper {
     @Select("select count(*) from dish where category_id = #{categoryId}")
     Integer countByCategoryId(Long categoryId);
 
+    /**
+     * 根据套餐id查询关联的菜品列表（套餐起售前校验"套餐内不能有停售菜品"用）
+     * 跨表联查：关系在 setmeal_dish 中间表，菜品主体在 dish 表；
+     * 之所以放在 DishMapper：这条查询返回的主体是"菜品"——
+     * 和 getSetmealIdsByDishIds（只返回一串 id，放在关系表自己的 Mapper）的场景相反
+     *
+     * @param setmealId
+     * @return
+     */
+    List<Dish> getBySetmealId(Long setmealId);
 
 }
