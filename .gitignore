@@ -17,5 +17,3 @@ application-dev.yml
 .vscode/
 *.log
 
-.claude/
-openspec/
