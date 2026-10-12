@@ -16,3 +16,6 @@ application-dev.yml
 # 编辑器配置与日志
 .vscode/
 *.log
+
+.claude/
+openspec/
