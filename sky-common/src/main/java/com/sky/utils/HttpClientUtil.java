@@ -15,7 +15,6 @@ import org.apache.http.message.BasicNameValuePair;
 import org.apache.http.util.EntityUtils;
 
 import java.io.IOException;
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -33,44 +32,26 @@ public class HttpClientUtil {
      * @param paramMap
      * @return
      */
-    public static String doGet(String url,Map<String,String> paramMap){
-        // 创建Httpclient对象
-        CloseableHttpClient httpClient = HttpClients.createDefault();
-
-        String result = "";
-        CloseableHttpResponse response = null;
-
-        try{
-            URIBuilder builder = new URIBuilder(url);
-            if(paramMap != null){
-                for (String key : paramMap.keySet()) {
-                    builder.addParameter(key,paramMap.get(key));
-                }
-            }
-            URI uri = builder.build();
-
-            //创建GET请求
-            HttpGet httpGet = new HttpGet(uri);
-
-            //发送请求
-            response = httpClient.execute(httpGet);
-
-            //判断响应状态
-            if(response.getStatusLine().getStatusCode() == 200){
-                result = EntityUtils.toString(response.getEntity(),"UTF-8");
-            }
-        }catch (Exception e){
-            e.printStackTrace();
-        }finally {
-            try {
-                response.close();
-                httpClient.close();
-            } catch (IOException e) {
-                e.printStackTrace();
+    public static String doGet(String url, Map<String, String> paramMap) throws Exception {
+        URIBuilder builder = new URIBuilder(url);
+        if (paramMap != null) {
+            for (Map.Entry<String, String> entry : paramMap.entrySet()) {
+                builder.addParameter(entry.getKey(), entry.getValue());
             }
         }
 
-        return result;
+        HttpGet request = new HttpGet(builder.build());
+        request.setConfig(builderRequestConfig());
+
+        // 自动关闭已创建的资源；请求失败时不会再因 response 为 null 抛出异常。
+        try (CloseableHttpClient client = HttpClients.createDefault();
+             CloseableHttpResponse response = client.execute(request)) {
+            int status = response.getStatusLine().getStatusCode();
+            if (status != 200 || response.getEntity() == null) {
+                throw new IOException("HTTP GET 请求失败，状态码：" + status);
+            }
+            return EntityUtils.toString(response.getEntity(), "UTF-8");
+        }
     }
 
     /**
