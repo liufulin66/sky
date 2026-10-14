@@ -29,7 +29,7 @@ openid 唯一约束是并发注册正确工作的前提。已有数据库使用 
 
 后续业务请求携带 `authentication: <token>`，名称来自 `sky.jwt.user-token-name`；当前有效期两小时。
 
-`/user/**` 注册用户 JWT 拦截器，放行 `/user/user/login` 和 `/user/shop/status`。校验成功后将 userId 写入 BaseContext，请求结束清理 ThreadLocal。管理员 token 不能替代用户 token。
+`/user/**` 注册用户 JWT 拦截器，放行登录、店铺查询及已确认的商品浏览路径：`/user/user/login`、`/user/shop/status`、`/user/category/list`、`/user/dish/list`、`/user/setmeal/list`、`/user/setmeal/dish/*`。商品浏览约定见 [商品浏览接口文档](product-browsing.md)。其他用户端接口继续鉴权。校验成功后将 userId 写入 BaseContext，请求结束清理 ThreadLocal。管理员 token 不能替代用户 token。
 
 ## 配置与联调
 

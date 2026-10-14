@@ -16,4 +16,7 @@ public interface UserMapper {
     @Options(useGeneratedKeys = true, keyProperty = "id")
     @Insert("insert into `user` (openid, create_time) values (#{openid}, #{createTime})")
     void insert(User user);
+
+    /** 购物车写事务中锁定当前用户，串行化同一用户的增减和清空。 */
+    Long lockById(Long id);
 }

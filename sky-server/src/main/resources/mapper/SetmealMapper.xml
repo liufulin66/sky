@@ -2,6 +2,44 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.sky.mapper.SetmealMapper">
 
+    <!-- 列表和内容查询共用可见性规则。缺失菜品或异常状态也不能视为可售。 -->
+    <sql id="userVisibleSetmeal">
+        s.status = 1 and c.status = 1 and c.type = 2
+        and not exists (
+            select 1 from setmeal_dish unavailable
+            left join dish unavailable_dish on unavailable_dish.id = unavailable.dish_id
+            where unavailable.setmeal_id = s.id
+              and (unavailable_dish.id is null
+                   or unavailable_dish.status is null
+                   or unavailable_dish.status != 1)
+        )
+    </sql>
+
+    <select id="getByIdForUser" resultType="com.sky.entity.Setmeal">
+        select s.* from setmeal s
+        inner join category c on c.id = s.category_id
+        where s.id = #{id} and <include refid="userVisibleSetmeal"/>
+    </select>
+
+    <select id="listForUser" resultType="com.sky.entity.Setmeal">
+        select s.* from setmeal s
+        inner join category c on c.id = s.category_id
+        where s.category_id = #{categoryId}
+          and <include refid="userVisibleSetmeal"/>
+        order by s.create_time desc, s.id desc
+    </select>
+
+    <select id="getDishItemsForUser" resultType="com.sky.vo.DishItemVO">
+        select d.name, sd.copies, d.image, d.description
+        from setmeal s
+        inner join category c on c.id = s.category_id
+        inner join setmeal_dish sd on sd.setmeal_id = s.id
+        inner join dish d on d.id = sd.dish_id
+        where s.id = #{id}
+          and <include refid="userVisibleSetmeal"/>
+        order by sd.id asc
+    </select>
+
     <!--
         分页查询：关联 category 表取分类名（left join：即使分类被删也要能查出套餐）
         动态条件：name 模糊、categoryId 精确、status 精确，都可选

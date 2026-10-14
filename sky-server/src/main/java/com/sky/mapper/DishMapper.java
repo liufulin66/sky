@@ -70,6 +70,10 @@ public interface DishMapper {
      */
     List<Dish> list(Dish dish);
 
+    List<DishVO> listWithFlavorForUser(Long categoryId);
+
+    Dish getByIdForUser(Long id);
+
         /**
      * 根据分类id查询菜品数量（用于删除分类前的关联校验）
      * 注：dish.category_id 上没有物理外键，关联关系靠应用层维护

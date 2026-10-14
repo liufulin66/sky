@@ -8,6 +8,7 @@ import com.sky.dto.CategoryDTO;
 import com.sky.dto.CategoryPageQueryDTO;
 import com.sky.entity.Category;
 import com.sky.exception.DeletionNotAllowedException;
+import com.sky.exception.BaseException;
 import com.sky.mapper.CategoryMapper;
 import com.sky.mapper.DishMapper;
 import com.sky.mapper.SetmealMapper;
@@ -128,6 +129,17 @@ public class CategoryServiceImpl implements CategoryService {
         Category category = new Category();
         category.setType(type);
 
+        return categoryMapper.list(category);
+    }
+
+    @Override
+    public List<Category> listForUser(Integer type) {
+        if (type != null && type != 1 && type != 2) {
+            throw new BaseException("分类类型只能为1（菜品）或2（套餐）");
+        }
+        Category category = new Category();
+        category.setType(type);
+        category.setStatus(StatusConstant.ENABLE);
         return categoryMapper.list(category);
     }
 

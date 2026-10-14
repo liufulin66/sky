@@ -10,6 +10,7 @@ import com.sky.entity.Dish;
 import com.sky.entity.Setmeal;
 import com.sky.entity.SetmealDish;
 import com.sky.exception.DeletionNotAllowedException;
+import com.sky.exception.BaseException;
 import com.sky.exception.SetmealEnableFailedException;
 import com.sky.mapper.DishMapper;
 import com.sky.mapper.SetmealDishMapper;
@@ -17,6 +18,7 @@ import com.sky.mapper.SetmealMapper;
 import com.sky.result.PageResult;
 import com.sky.service.SetmealService;
 import com.sky.vo.SetmealVO;
+import com.sky.vo.DishItemVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -188,6 +190,23 @@ public class SetmealServiceImpl implements SetmealService {
         //    update_time / update_user 由 @AutoFill(UPDATE) 切面在 SQL 执行前补齐
         Setmeal setmeal = Setmeal.builder().id(id).status(status).build();
         setmealMapper.update(setmeal);
+    }
+
+    @Override
+    public List<Setmeal> listForUser(Long categoryId) {
+        if (categoryId == null || categoryId <= 0) {
+            throw new BaseException("套餐分类id必须为正整数");
+        }
+        return setmealMapper.listForUser(categoryId);
+    }
+
+    @Override
+    public List<DishItemVO> getDishItemsForUser(Long id) {
+        if (id == null || id <= 0) {
+            throw new BaseException("套餐id必须为正整数");
+        }
+        // SQL 同时校验整个套餐的可见性，避免绕过列表访问已停售套餐的内容。
+        return setmealMapper.getDishItemsForUser(id);
     }
 
 }

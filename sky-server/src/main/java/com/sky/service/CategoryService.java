@@ -55,6 +55,9 @@ public interface CategoryService {
      */
     List<Category> list(Integer type);
 
+    /** 用户端分类列表，只返回启用分类；type 为空时查询全部类型。 */
+    List<Category> listForUser(Integer type);
+
     /**
      * 根据id删除分类
      *

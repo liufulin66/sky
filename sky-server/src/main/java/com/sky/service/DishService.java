@@ -63,4 +63,7 @@ public interface DishService {
      */
     List<Dish> list(Long categoryId);
 
+    /** 用户端查询启用分类下的在售菜品，包含口味。 */
+    List<DishVO> listWithFlavorForUser(Long categoryId);
+
 }

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.sky.mapper.ShoppingCartMapper">
+    <select id="listByUserId" resultType="com.sky.entity.ShoppingCart">
+        select * from shopping_cart where user_id = #{userId}
+        order by create_time desc, id desc
+    </select>
+
+    <select id="getByVariant" resultType="com.sky.entity.ShoppingCart">
+        select * from shopping_cart
+        where user_id = #{userId}
+          and dish_id &lt;=> #{dishId}
+          and setmeal_id &lt;=> #{setmealId}
+          and coalesce(dish_flavor, '') = #{dishFlavor}
+        order by id asc limit 1
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        insert into shopping_cart (name, image, user_id, dish_id, setmeal_id, dish_flavor, number, amount, create_time)
+        values (#{name}, #{image}, #{userId}, #{dishId}, #{setmealId}, #{dishFlavor}, #{number}, #{amount}, #{createTime})
+    </insert>
+
+    <update id="incrementAndRefresh">
+        update shopping_cart
+        set number = number + 1, name = #{name}, image = #{image}, amount = #{amount}
+        where id = #{id} and user_id = #{userId}
+          and number > 0 and number &lt; 2147483647
+    </update>
+
+    <update id="decrement">
+        update shopping_cart set number = number - 1
+        where id = #{id} and user_id = #{userId} and number > 1
+    </update>
+
+    <delete id="deleteByIdAndUserId">
+        delete from shopping_cart where id = #{id} and user_id = #{userId}
+    </delete>
+
+    <delete id="deleteByUserId">
+        delete from shopping_cart where user_id = #{userId}
+    </delete>
+</mapper>

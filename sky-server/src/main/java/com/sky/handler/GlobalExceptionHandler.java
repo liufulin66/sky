@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.sql.SQLIntegrityConstraintViolationException;
 
@@ -16,6 +17,12 @@ import java.sql.SQLIntegrityConstraintViolationException;
 @RestControllerAdvice
 @Slf4j
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public Result<String> handleParameterTypeMismatch(MethodArgumentTypeMismatchException ex) {
+        log.warn("请求参数格式错误：参数名={}", ex.getName());
+        return Result.error("请求参数格式错误：" + ex.getName());
+    }
 
     /**
      * 业务异常：一网打尽所有继承 BaseException 的异常，消息直接透传给前端

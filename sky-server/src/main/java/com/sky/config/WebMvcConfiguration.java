@@ -48,7 +48,9 @@ public class WebMvcConfiguration implements WebMvcConfigurer {
 
         registry.addInterceptor(jwtTokenUserInterceptor)
                 .addPathPatterns("/user/**")
-                .excludePathPatterns("/user/user/login", "/user/shop/status");
+                .excludePathPatterns("/user/user/login", "/user/shop/status",
+                        "/user/category/list", "/user/dish/list",
+                        "/user/setmeal/list", "/user/setmeal/dish/*");
     }
 
     /**

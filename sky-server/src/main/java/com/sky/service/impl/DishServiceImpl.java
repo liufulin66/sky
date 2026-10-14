@@ -9,6 +9,7 @@ import com.sky.dto.DishPageQueryDTO;
 import com.sky.entity.Dish;
 import com.sky.entity.DishFlavor;
 import com.sky.exception.DeletionNotAllowedException;
+import com.sky.exception.BaseException;
 import com.sky.mapper.DishFlavorMapper;
 import com.sky.mapper.DishMapper;
 import com.sky.mapper.SetmealDishMapper;
@@ -167,6 +168,15 @@ public class DishServiceImpl implements DishService {
         Dish dish = new Dish();
         dish.setCategoryId(categoryId);
         return dishMapper.list(dish);
+    }
+
+    @Override
+    public List<DishVO> listWithFlavorForUser(Long categoryId) {
+        if (categoryId == null || categoryId <= 0) {
+            throw new BaseException("菜品分类id必须为正整数");
+        }
+        // 联查分类、菜品和口味，避免每个菜品再单独查询口味。
+        return dishMapper.listWithFlavorForUser(categoryId);
     }
 
 }
