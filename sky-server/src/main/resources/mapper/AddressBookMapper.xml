@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.sky.mapper.AddressBookMapper">
+    <select id="listByUserId" resultType="com.sky.entity.AddressBook">
+        select * from address_book where user_id = #{userId}
+        order by is_default desc, id desc
+    </select>
+
+    <select id="getByIdAndUserId" resultType="com.sky.entity.AddressBook">
+        select * from address_book where id = #{id} and user_id = #{userId}
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        insert into address_book (user_id, consignee, phone, sex,
+            province_code, province_name, city_code, city_name,
+            district_code, district_name, detail, label, is_default)
+        values (#{userId}, #{consignee}, #{phone}, #{sex},
+            #{provinceCode}, #{provinceName}, #{cityCode}, #{cityName},
+            #{districtCode}, #{districtName}, #{detail}, #{label}, 0)
+    </insert>
+
+    <!-- 全量保存地址表单；可选字段允许清空，身份及默认状态不在更新范围内。 -->
+    <update id="update">
+        update address_book set consignee = #{consignee}, phone = #{phone}, sex = #{sex},
+            province_code = #{provinceCode}, province_name = #{provinceName},
+            city_code = #{cityCode}, city_name = #{cityName},
+            district_code = #{districtCode}, district_name = #{districtName},
+            detail = #{detail}, label = #{label}
+        where id = #{id} and user_id = #{userId}
+    </update>
+
+    <delete id="deleteByIdAndUserId">
+        delete from address_book where id = #{id} and user_id = #{userId}
+    </delete>
+
+    <update id="clearDefaultByUserId">
+        update address_book set is_default = 0
+        where user_id = #{userId} and is_default = 1
+    </update>
+
+    <update id="setDefaultByIdAndUserId">
+        update address_book set is_default = 1 where id = #{id} and user_id = #{userId}
+    </update>
+
+    <select id="getDefaultByUserId" resultType="com.sky.entity.AddressBook">
+        select * from address_book where user_id = #{userId} and is_default = 1
+        order by id desc limit 1
+    </select>
+</mapper>

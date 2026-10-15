@@ -1,5 +1,6 @@
 package com.sky.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -41,6 +42,12 @@ public class Orders implements Serializable {
 
     //订单号
     private String number;
+
+    // 幂等信息只供服务端使用，不向订单查询接口暴露。
+    @JsonIgnore
+    private String requestId;
+    @JsonIgnore
+    private String requestHash;
 
     //订单状态 1待付款 2待接单 3已接单 4派送中 5已完成 6已取消 7退款
     private Integer status;
@@ -101,6 +108,9 @@ public class Orders implements Serializable {
 
     //打包费
     private int packAmount;
+
+    // 本订单配送费快照（元）
+    private BigDecimal deliveryAmount;
 
     //餐具数量
     private int tablewareNumber;

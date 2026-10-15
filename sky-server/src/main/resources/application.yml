@@ -18,6 +18,8 @@ spring:
       port: ${sky.redis.port}
       #password: ${sky.redis.password}
       database: ${sky.redis.database}
+      connect-timeout: 1s
+      timeout: 1s
 
 mybatis:
   #mapper配置文件
@@ -36,6 +38,16 @@ logging:
         controller: info
 
 sky:
+  order:
+    # 固定每单费用，单位元；打包费沿用整数类型。下单时同时保存费用快照。
+    pack-amount: 0
+    delivery-amount: 0.00
+  cache:
+    product:
+      enabled: true
+      ttl: 5m
+      jitter-seconds: 60
+      empty-ttl: 30s
   jwt:
     # 设置jwt签名加密时使用的秘钥
     admin-secret-key: sky-admin-jwt-secret-2026-8f3a2b7c1d9e4f6a

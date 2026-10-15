@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.sky.mapper.OrderDetailMapper">
+    <insert id="insertBatch">
+        insert into order_detail (name, image, order_id, dish_id, setmeal_id, dish_flavor, number, amount)
+        values
+        <foreach collection="details" item="d" separator=",">
+            (#{d.name}, #{d.image}, #{d.orderId}, #{d.dishId}, #{d.setmealId}, #{d.dishFlavor}, #{d.number}, #{d.amount})
+        </foreach>
+    </insert>
+
+    <select id="listByOrderIdsAndUserId" resultType="com.sky.entity.OrderDetail">
+        select d.* from order_detail d
+        inner join orders o on o.id = d.order_id
+        where o.user_id = #{userId} and d.order_id in
+        <foreach collection="orderIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+        order by d.order_id asc, d.id asc
+    </select>
+</mapper>

@@ -2,6 +2,7 @@ package com.sky.service.impl;
 
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
+import com.sky.cache.ProductBrowsingCache;
 import com.sky.constant.MessageConstant;
 import com.sky.constant.StatusConstant;
 import com.sky.dto.DishDTO;
@@ -35,6 +36,9 @@ public class DishServiceImpl implements DishService {
     @Autowired
     private SetmealDishMapper setmealDishMapper;
 
+    @Autowired
+    private ProductBrowsingCache productBrowsingCache;
+
     /**
      * 新增菜品（含口味）
      */
@@ -61,6 +65,7 @@ public class DishServiceImpl implements DishService {
             flavors.forEach(f -> f.setDishId(dish.getId()));
             dishFlavorMapper.insertBatch(flavors);
         }
+        productBrowsingCache.invalidateAfterCommit();
     }
 
     /**
@@ -96,6 +101,7 @@ public class DishServiceImpl implements DishService {
         // 3. 先删菜品，再删它们的所有口味（两条 delete 必须在同一事务里）
         dishMapper.deleteByIds(ids);
         dishFlavorMapper.deleteByDishIds(ids);
+        productBrowsingCache.invalidateAfterCommit();
     }
 
     /**
@@ -147,15 +153,18 @@ public class DishServiceImpl implements DishService {
             flavors.forEach(f -> f.setDishId(dishDTO.getId()));
             dishFlavorMapper.insertBatch(flavors);
         }
+        productBrowsingCache.invalidateAfterCommit();
     }
 
     /**
      * 菜品起售停售
      */
     @Override
+    @Transactional
     public void startOrStop(Integer status, Long id) {
         Dish dish = Dish.builder().id(id).status(status).build();
         dishMapper.update(dish);   // 审计字段由切面填充
+        productBrowsingCache.invalidateAfterCommit();
     }
 
     /**
@@ -176,7 +185,8 @@ public class DishServiceImpl implements DishService {
             throw new BaseException("菜品分类id必须为正整数");
         }
         // 联查分类、菜品和口味，避免每个菜品再单独查询口味。
-        return dishMapper.listWithFlavorForUser(categoryId);
+        return productBrowsingCache.getList("dish:category:" + categoryId, DishVO.class,
+                () -> dishMapper.listWithFlavorForUser(categoryId));
     }
 
 }

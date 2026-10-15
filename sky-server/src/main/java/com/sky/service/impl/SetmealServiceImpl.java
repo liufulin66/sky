@@ -2,6 +2,7 @@ package com.sky.service.impl;
 
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
+import com.sky.cache.ProductBrowsingCache;
 import com.sky.constant.MessageConstant;
 import com.sky.constant.StatusConstant;
 import com.sky.dto.SetmealDTO;
@@ -45,6 +46,9 @@ public class SetmealServiceImpl implements SetmealService {
     @Autowired
     private DishMapper dishMapper;
 
+    @Autowired
+    private ProductBrowsingCache productBrowsingCache;
+
     /**
      * 新增套餐（含菜品关系）
      */
@@ -71,6 +75,7 @@ public class SetmealServiceImpl implements SetmealService {
             setmealDishes.forEach(sd -> sd.setSetmealId(setmeal.getId()));
             setmealDishMapper.insertBatch(setmealDishes);
         }
+        productBrowsingCache.invalidateAfterCommit();
     }
 
     /**
@@ -109,6 +114,7 @@ public class SetmealServiceImpl implements SetmealService {
         //    （setmeal 与 setmeal_dish 无物理外键，一致性全靠应用层 + 事务守）
         setmealDishMapper.deleteBySetmealIds(ids);
         setmealMapper.deleteByIds(ids);
+        productBrowsingCache.invalidateAfterCommit();
     }
 
     /**
@@ -164,12 +170,14 @@ public class SetmealServiceImpl implements SetmealService {
             setmealDishes.forEach(sd -> sd.setSetmealId(setmealDTO.getId()));
             setmealDishMapper.insertBatch(setmealDishes);
         }
+        productBrowsingCache.invalidateAfterCommit();
     }
 
     /**
      * 套餐起售停售
      */
     @Override
+    @Transactional
     public void startOrStop(Integer status, Long id) {
         // 1. 方向不对称：只有【起售】需要校验——起售意味着用户马上能下单，
         //    而套餐是"菜品的组合"，只要有一道菜停售，这个套餐根本做不出来；
@@ -190,6 +198,7 @@ public class SetmealServiceImpl implements SetmealService {
         //    update_time / update_user 由 @AutoFill(UPDATE) 切面在 SQL 执行前补齐
         Setmeal setmeal = Setmeal.builder().id(id).status(status).build();
         setmealMapper.update(setmeal);
+        productBrowsingCache.invalidateAfterCommit();
     }
 
     @Override
@@ -197,7 +206,8 @@ public class SetmealServiceImpl implements SetmealService {
         if (categoryId == null || categoryId <= 0) {
             throw new BaseException("套餐分类id必须为正整数");
         }
-        return setmealMapper.listForUser(categoryId);
+        return productBrowsingCache.getList("setmeal:category:" + categoryId, Setmeal.class,
+                () -> setmealMapper.listForUser(categoryId));
     }
 
     @Override
@@ -206,7 +216,8 @@ public class SetmealServiceImpl implements SetmealService {
             throw new BaseException("套餐id必须为正整数");
         }
         // SQL 同时校验整个套餐的可见性，避免绕过列表访问已停售套餐的内容。
-        return setmealMapper.getDishItemsForUser(id);
+        return productBrowsingCache.getList("setmeal:dish:" + id, DishItemVO.class,
+                () -> setmealMapper.getDishItemsForUser(id));
     }
 
 }

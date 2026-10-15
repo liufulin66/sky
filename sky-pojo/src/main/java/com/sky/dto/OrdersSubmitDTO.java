@@ -9,10 +9,12 @@ import java.time.LocalDateTime;
 
 @Data
 public class OrdersSubmitDTO implements Serializable {
+    // 同一次下单及网络重试必须使用相同requestId；修改表单或重新下单时生成新值。
+    private String requestId;
     //地址簿id
     private Long addressBookId;
     //付款方式
-    private int payMethod;
+    private Integer payMethod;
     //备注
     private String remark;
     //预计送达时间

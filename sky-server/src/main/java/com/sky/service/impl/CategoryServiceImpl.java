@@ -2,6 +2,7 @@ package com.sky.service.impl;
 
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
+import com.sky.cache.ProductBrowsingCache;
 import com.sky.constant.MessageConstant;
 import com.sky.constant.StatusConstant;
 import com.sky.dto.CategoryDTO;
@@ -16,6 +17,7 @@ import com.sky.result.PageResult;
 import com.sky.service.CategoryService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -31,12 +33,16 @@ public class CategoryServiceImpl implements CategoryService {
     @Autowired
     private SetmealMapper setmealMapper;
 
+    @Autowired
+    private ProductBrowsingCache productBrowsingCache;
+
     /**
      * 新增分类
      *
      * @param categoryDTO
      */
     @Override
+    @Transactional
     public void save(CategoryDTO categoryDTO) {
         Category category = new Category();
 
@@ -52,6 +58,7 @@ public class CategoryServiceImpl implements CategoryService {
 
         // 4. 入库（name 唯一索引冲突会抛数据库异常，由全局异常处理器按索引名转成"分类名称已存在"）
         categoryMapper.insert(category);
+        productBrowsingCache.invalidateAfterCommit();
     }
 
     /**
@@ -75,6 +82,7 @@ public class CategoryServiceImpl implements CategoryService {
      * @param id
      */
     @Override
+    @Transactional
     public void startOrStop(Integer status, Long id) {
         // 只携带"主键 + 要改的字段 + 审计字段"，其余保持 null，与动态 SQL <if> 配合：只更新非空字段
         Category category = Category.builder()
@@ -83,6 +91,7 @@ public class CategoryServiceImpl implements CategoryService {
                 .build();
 
         categoryMapper.update(category);
+        productBrowsingCache.invalidateAfterCommit();
     }
 
     /**
@@ -91,6 +100,7 @@ public class CategoryServiceImpl implements CategoryService {
      * @param categoryDTO
      */
     @Override
+    @Transactional
     public void update(CategoryDTO categoryDTO) {
         Category category = new Category();
 
@@ -103,6 +113,7 @@ public class CategoryServiceImpl implements CategoryService {
         
         // 3. 复用与"启用禁用"同一条动态更新 SQL
         categoryMapper.update(category);
+        productBrowsingCache.invalidateAfterCommit();
     }
 
     /**
@@ -140,7 +151,8 @@ public class CategoryServiceImpl implements CategoryService {
         Category category = new Category();
         category.setType(type);
         category.setStatus(StatusConstant.ENABLE);
-        return categoryMapper.list(category);
+        return productBrowsingCache.getList("category:type:" + (type == null ? "all" : type),
+                Category.class, () -> categoryMapper.list(category));
     }
 
     /**
@@ -149,6 +161,7 @@ public class CategoryServiceImpl implements CategoryService {
      * @param id
      */
     @Override
+    @Transactional
     public void deleteById(Long id) {
         // 1. 校验分类下是否关联了菜品（表间没有物理外键，关联关系靠应用层守）
         Integer dishCount = dishMapper.countByCategoryId(id);
@@ -165,6 +178,7 @@ public class CategoryServiceImpl implements CategoryService {
 
         // 3. 都没关联，才允许删除
         categoryMapper.deleteById(id);
+        productBrowsingCache.invalidateAfterCommit();
     }
 
 }
