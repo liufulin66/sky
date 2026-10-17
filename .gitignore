@@ -5,14 +5,22 @@
 *Test.java
 **/test/
 
-# 地址簿和订单的回归测试纳入版本管理，其他本地测试继续沿用原忽略规则。
+# 地址簿、订单、工作台和报表的回归测试纳入版本管理，其他本地测试继续沿用原忽略规则。
 !sky-server/src/test/
 !sky-server/src/test/java/com/sky/controller/AddressBookControllerTest.java
 !sky-server/src/test/java/com/sky/service/impl/AddressBookServiceImplTest.java
 !sky-server/src/test/java/com/sky/service/impl/AddressBookIntegrationTest.java
 !sky-server/src/test/java/com/sky/controller/OrderControllerTest.java
 !sky-server/src/test/java/com/sky/service/impl/OrderServiceImplTest.java
+!sky-server/src/test/java/com/sky/service/impl/AdminOrderServiceImplTest.java
 !sky-server/src/test/java/com/sky/service/impl/OrderIntegrationTest.java
+!sky-server/src/test/java/com/sky/controller/WorkspaceControllerTest.java
+!sky-server/src/test/java/com/sky/service/impl/WorkspaceServiceImplTest.java
+!sky-server/src/test/java/com/sky/service/impl/WorkspaceIntegrationTest.java
+!sky-server/src/test/java/com/sky/controller/ReportControllerTest.java
+!sky-server/src/test/java/com/sky/service/impl/ReportServiceImplTest.java
+!sky-server/src/test/java/com/sky/service/impl/ReportIntegrationTest.java
+!sky-server/src/test/java/com/sky/service/impl/ReportExcelExportTest.java
 
 # 本地配置(含数据库密码/OSS密钥等敏感信息),不入库
 application-dev.yml

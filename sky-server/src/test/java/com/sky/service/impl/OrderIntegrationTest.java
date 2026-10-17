@@ -71,13 +71,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class OrderIntegrationTest {
     private final String tablePrefix = "ord_test_" + UUID.randomUUID().toString().replace("-", "") + "_";
     private static final Pattern TABLE_REFERENCE = Pattern.compile(
-            "(?i)(\\b(?:from|join|into|update|table)\\s+)(`?)(address_book|order_detail|orders|shopping_cart|setmeal_dish|setmeal|category|dish|user)\\b\\2");
+            "(?i)(\\b(?:from|join|into|update|table)\\s+)(`?)(address_book|order_repetition|order_detail|orders|shopping_cart|setmeal_dish|setmeal|category|dish|user)\\b\\2");
     private final List<String> createdTables = new ArrayList<>();
     private Connection fixtureConnection;
     private GenericWebApplicationContext context;
     private MockMvc mvc;
     private ShopService shop;
     private OrderProperties fees;
+    private DriverManagerDataSource dataSource;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -90,6 +91,7 @@ class OrderIntegrationTest {
                 + "?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf-8&useSSL=false&allowPublicKeyRetrieval=true&connectTimeout=3000&socketTimeout=10000";
         DriverManagerDataSource source = new DriverManagerDataSource(url,
                 props.getProperty(prefix + "username"), props.getProperty(prefix + "password"));
+        dataSource = source;
         fixtureConnection = source.getConnection();
         execute("CREATE TABLE user (id BIGINT PRIMARY KEY) ENGINE=InnoDB");
         execute("CREATE TABLE category (id BIGINT PRIMARY KEY, type INT, status INT) ENGINE=InnoDB");
@@ -102,6 +104,11 @@ class OrderIntegrationTest {
         String migration = Files.readString(Path.of("../sql/migrations/2026-10-15-user-orders.sql"))
                 .replaceAll("(?m)^\\s*--.*$", "");
         for (String sql : migration.split(";")) {
+            if (!sql.isBlank()) { execute(sql.trim()); }
+        }
+        String repetitionMigration = Files.readString(Path.of("../sql/migrations/2026-10-16-order-repetition.sql"))
+                .replaceAll("(?m)^\\s*--.*$", "");
+        for (String sql : repetitionMigration.split(";")) {
             if (!sql.isBlank()) { execute(sql.trim()); }
         }
         execute("INSERT INTO user VALUES (5),(6)");
@@ -122,7 +129,7 @@ class OrderIntegrationTest {
         pagingProperties.setProperty("helperDialect", "mysql");
         paging.setProperties(pagingProperties);
         config.addInterceptor(paging);
-        for (String resource : List.of("User", "AddressBook", "ShoppingCart", "Dish", "Setmeal", "Order", "OrderDetail")) {
+        for (String resource : List.of("User", "AddressBook", "ShoppingCart", "Dish", "Setmeal", "Order", "OrderDetail", "OrderRepetition")) {
             String name = "mapper/" + resource + "Mapper.xml";
             try (InputStream input = getClass().getClassLoader().getResourceAsStream(name)) {
                 String xml = qualifyTables(new String(input.readAllBytes(), StandardCharsets.UTF_8));
@@ -142,6 +149,7 @@ class OrderIntegrationTest {
         context.registerBean(SetmealMapper.class, () -> template.getMapper(SetmealMapper.class));
         context.registerBean(OrderMapper.class, () -> template.getMapper(OrderMapper.class));
         context.registerBean(OrderDetailMapper.class, () -> template.getMapper(OrderDetailMapper.class));
+        context.registerBean(OrderRepetitionMapper.class, () -> template.getMapper(OrderRepetitionMapper.class));
         shop = mock(ShopService.class); // 营业状态是独立的Redis存储，这里只隔离外部Redis。
         fees = new OrderProperties();
         context.registerBean(ShopService.class, () -> shop);
@@ -226,6 +234,33 @@ class OrderIntegrationTest {
     private JSONObject detail(long userId, long orderId, int expectedCode) throws Exception {
         return JSON.parseObject(mvc.perform(get("/user/order/orderDetail/" + orderId).header("authentication", token(userId)))
                 .andExpect(jsonPath("$.code").value(expectedCode)).andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8));
+    }
+
+    private void cancel(long userId, long orderId, String body, int expectedCode) throws Exception {
+        var request = put("/user/order/cancel/" + orderId).header("authentication", token(userId));
+        if (body != null) { request.contentType("application/json").content(body); }
+        mvc.perform(request).andExpect(status().isOk()).andExpect(jsonPath("$.code").value(expectedCode));
+        assertNull(BaseContext.getCurrentId());
+    }
+
+    private JSONObject repetition(long userId, long orderId, String key, int expectedCode) throws Exception {
+        String json = mvc.perform(post("/user/order/repetition/" + orderId).header("authentication", token(userId))
+                        .contentType("application/json").content(JSON.toJSONString(Map.of("requestId", key))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.code").value(expectedCode))
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        assertNull(BaseContext.getCurrentId());
+        return JSON.parseObject(json);
+    }
+
+    private com.alibaba.fastjson.JSONArray cartRows(long userId) throws Exception {
+        return JSON.parseObject(mvc.perform(get("/user/shoppingCart/list").header("authentication", token(userId)))
+                .andExpect(jsonPath("$.code").value(1)).andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8))
+                .getJSONArray("data");
+    }
+
+    private long sourceOrder(long userId, String key) throws Exception {
+        cart(userId);
+        return submit(userId, form(key, userId), 1).getJSONObject("data").getLongValue("id");
     }
 
     @Test
@@ -443,10 +478,402 @@ class OrderIntegrationTest {
         assertEquals(2, count("orders"));
     }
 
+    @Test
+    void cancellationPreservesSnapshotsAndIsIdempotentWithoutRestoringCart() throws Exception {
+        long id = sourceOrder(5, "cancel-source");
+        cart(5);
+        var before = cartRows(5);
+        cancel(6, id, null, 0);
+        cancel(5, id, "{\"cancelReason\":\" 不想要了 \",\"id\":999}", 1);
+        JSONObject cancelled = detail(5, id, 1).getJSONObject("data");
+        assertEquals(6, cancelled.getIntValue("status"));
+        assertEquals(0, cancelled.getIntValue("payStatus"));
+        assertEquals("不想要了", cancelled.getString("cancelReason"));
+        assertNotNull(cancelled.getString("cancelTime"));
+        execute("UPDATE orders SET cancel_time='2026-01-01 00:00:00' WHERE id=" + id);
+        cancel(5, id, "{\"cancelReason\":\"第二次原因\"}", 1);
+        JSONObject replay = detail(5, id, 1).getJSONObject("data");
+        assertEquals("不想要了", replay.getString("cancelReason"));
+        assertTrue(replay.getString("cancelTime").startsWith("2026-01-01"));
+        assertEquals(before, cartRows(5));
+        assertEquals(1, count("orders"));
+        assertEquals(1, count("order_detail"));
+    }
+
+    @Test
+    void cancellationRejectsPaidAndOtherStatesAndAcceptsMissingReason() throws Exception {
+        long id = sourceOrder(5, "cancel-states");
+        for (int status = 1; status <= 6; status++) {
+            execute("UPDATE orders SET status=" + status + ",pay_status=1 WHERE id=" + id);
+            cancel(5, id, null, 0);
+        }
+        for (int status = 2; status <= 5; status++) {
+            execute("UPDATE orders SET status=" + status + ",pay_status=0 WHERE id=" + id);
+            cancel(5, id, null, 0);
+        }
+        execute("UPDATE orders SET status=1,pay_status=0 WHERE id=" + id);
+        cancel(5, id, null, 1);
+        assertEquals("用户主动取消", detail(5, id, 1).getJSONObject("data").getString("cancelReason"));
+        cancel(5, 999999, null, 0);
+    }
+
+    @Test
+    void cancellationAndPaymentStyleConditionalUpdateCannotBothWin() throws Exception {
+        long id = sourceOrder(5, "cancel-race");
+        var executor = Executors.newFixedThreadPool(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            var cancellation = executor.submit(() -> {
+                start.await();
+                String json = mvc.perform(put("/user/order/cancel/" + id).header("authentication", token(5)))
+                        .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+                return JSON.parseObject(json).getIntValue("code");
+            });
+            var payment = executor.submit(() -> {
+                start.await();
+                // 仅在测试表模拟条件更新竞争，不提供模拟付款的业务接口。
+                try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+                    return statement.executeUpdate(qualifyTables("UPDATE orders SET status=2,pay_status=1 WHERE id="
+                            + id + " AND status=1 AND pay_status=0"));
+                }
+            });
+            start.countDown();
+            assertEquals(1, cancellation.get(20, TimeUnit.SECONDS) + payment.get(20, TimeUnit.SECONDS));
+            JSONObject finalOrder = detail(5, id, 1).getJSONObject("data");
+            assertTrue((finalOrder.getIntValue("status") == 6 && finalOrder.getIntValue("payStatus") == 0)
+                    || (finalOrder.getIntValue("status") == 2 && finalOrder.getIntValue("payStatus") == 1));
+        } finally {
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void repetitionMergesCurrentCartAndRefreshesPriceWithoutChangingOrder() throws Exception {
+        long id = sourceOrder(5, "repeat-source");
+        cart(5);
+        execute("UPDATE dish SET price=30,name='current-name',image='current-image' WHERE id=10");
+        repetition(6, id, "foreign", 0);
+        repetition(5, id, "repeat-op", 1);
+        JSONObject row = cartRows(5).getJSONObject(0);
+        assertEquals(4, row.getIntValue("number"));
+        assertEquals("current-name", row.getString("name"));
+        assertEquals("current-image", row.getString("image"));
+        assertEquals(0, row.getBigDecimal("amount").compareTo(new BigDecimal("30.00")));
+        assertEquals(1, count("order_repetition"));
+        JSONObject old = detail(5, id, 1).getJSONObject("data");
+        assertEquals(1, old.getIntValue("status"));
+        assertEquals("fresh-dish", old.getJSONArray("orderDetailList").getJSONObject(0).getString("name"));
+        execute("DELETE FROM shopping_cart WHERE user_id=5");
+        execute("UPDATE dish SET status=0 WHERE id=10");
+        repetition(5, id, "repeat-op", 1);
+        assertTrue(cartRows(5).isEmpty());
+        assertEquals(1, count("orders"));
+    }
+
+    @Test
+    void cancelledOrdersCanBeRepeatedAndRequestIdCannotChangeSource() throws Exception {
+        long first = sourceOrder(5, "first-source");
+        long second = sourceOrder(5, "second-source");
+        cancel(5, first, null, 1);
+        doThrow(new OrderBusinessException("店铺已打烊")).when(shop).checkOpenForNewOrder();
+        repetition(5, first, "op-one", 1);
+        repetition(5, second, "op-one", 0);
+        repetition(5, first, "op-two", 1);
+        assertEquals(4, cartRows(5).getJSONObject(0).getIntValue("number"));
+        assertEquals(2, count("order_repetition"));
+    }
+
+    @Test
+    void unavailableSecondItemRollsBackFirstMergeAndFailedKeyCanBeRetried() throws Exception {
+        long id = sourceOrder(5, "rollback-source");
+        execute("INSERT INTO order_detail (order_id,dish_id,name,number,amount) VALUES (" + id + ",11,'second-dish',1,10.00)");
+        cart(5);
+        execute("UPDATE dish SET price=30 WHERE id=10");
+        execute("UPDATE dish SET status=0 WHERE id=11");
+        var before = cartRows(5);
+        JSONObject failed = repetition(5, id, "retry-op", 0);
+        assertTrue(failed.getString("msg").contains("second-dish"));
+        assertEquals(before, cartRows(5)); // 数量、名称和价格刷新都回滚。
+        assertEquals(0, count("order_repetition"));
+        execute("UPDATE dish SET status=1 WHERE id=11");
+        repetition(5, id, "retry-op", 1);
+        assertEquals(2, cartRows(5).size());
+        assertEquals(1, count("order_repetition"));
+    }
+
+    @Test
+    void repetitionOverflowAndFailedOperationRecordRollBackAllCartChanges() throws Exception {
+        long id = sourceOrder(5, "overflow-source");
+        cart(5);
+        execute("UPDATE shopping_cart SET number=2147483646 WHERE user_id=5");
+        var before = cartRows(5);
+        repetition(5, id, "overflow-op", 0);
+        assertEquals(before, cartRows(5));
+        assertEquals(0, count("order_repetition"));
+        execute("UPDATE shopping_cart SET number=1 WHERE user_id=5");
+        before = cartRows(5);
+        String constraint = "reject_repeat_" + UUID.randomUUID().toString().substring(0, 8);
+        execute("ALTER TABLE order_repetition ADD CONSTRAINT " + constraint + " CHECK (order_id < 0)");
+        repetition(5, id, "record-failure", 0);
+        assertEquals(before, cartRows(5));
+        assertEquals(0, count("order_repetition"));
+    }
+
+    @Test
+    void concurrentRepetitionOnlyAppendsOnceAndDifferentUsersCanReuseKey() throws Exception {
+        long id = sourceOrder(5, "concurrent-repeat-source");
+        var executor = Executors.newFixedThreadPool(6);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<?>> futures = new ArrayList<>();
+        try {
+            for (int i = 0; i < 6; i++) {
+                futures.add(executor.submit(() -> {
+                    start.await();
+                    repetition(5, id, "same-op", 1);
+                    return null;
+                }));
+            }
+            start.countDown();
+            for (var future : futures) { future.get(20, TimeUnit.SECONDS); }
+        } finally {
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+        assertEquals(2, cartRows(5).getJSONObject(0).getIntValue("number"));
+        long other = sourceOrder(6, "other-repeat-source");
+        repetition(6, other, "same-op", 1);
+        assertEquals(2, cartRows(6).getJSONObject(0).getIntValue("number"));
+        assertEquals(2, count("order_repetition"));
+    }
+
+    private String adminToken() {
+        return JwtUtil.createJWT(context.getBean(JwtProperties.class).getAdminSecretKey(), 60000,
+                Map.of(JwtClaimsConstant.EMP_ID, 1L));
+    }
+
+    private JSONObject admin(org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request,
+                             int expectedCode) throws Exception {
+        String json = mvc.perform(request.header("token", adminToken()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.code").value(expectedCode))
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        assertNull(BaseContext.getCurrentId());
+        return JSON.parseObject(json);
+    }
+
+    private JSONObject adminDetail(long id) throws Exception {
+        return admin(get("/admin/order/details/" + id), 1).getJSONObject("data");
+    }
+
+    private long adminFixture(int state, int pay, long user) throws Exception {
+        // 仅在随机前缀测试表准备订单，不在业务中开放模拟支付接口。
+        execute("INSERT INTO orders (number,status,pay_status,user_id,address_book_id,order_time,amount) VALUES ('"
+                + UUID.randomUUID().toString().replace("-", "") + "'," + state + "," + pay + "," + user
+                + "," + (user == 5 ? 1 : 2) + ",'2026-01-01 12:00:00',50.00)");
+        try (Statement statement = fixtureConnection.createStatement();
+             var rows = statement.executeQuery("SELECT LAST_INSERT_ID()")) {
+            assertTrue(rows.next());
+            return rows.getLong(1);
+        }
+    }
+
+    @Test
+    void adminStatisticsIncludeHistoricalPendingOrdersAndEmptyTableReturnsZeros() throws Exception {
+        JSONObject empty = admin(get("/admin/order/statistics"), 1).getJSONObject("data");
+        assertEquals(0, empty.getIntValue("toBeConfirmed"));
+        assertEquals(0, empty.getIntValue("confirmed"));
+        assertEquals(0, empty.getIntValue("deliveryInProgress"));
+        adminFixture(2, 1, 5); adminFixture(2, 1, 6);
+        adminFixture(3, 1, 5); adminFixture(4, 1, 6);
+        adminFixture(1, 0, 5); adminFixture(5, 1, 5); adminFixture(6, 0, 5);
+        JSONObject counts = admin(get("/admin/order/statistics"), 1).getJSONObject("data");
+        assertEquals(2, counts.getIntValue("toBeConfirmed"));
+        assertEquals(1, counts.getIntValue("confirmed"));
+        assertEquals(1, counts.getIntValue("deliveryInProgress"));
+    }
+
+    @Test
+    void adminSearchPaginatesAllUsersCombinesFiltersAndReadsHistoricalDetails() throws Exception {
+        long one = sourceOrder(5, "admin-search-five");
+        long two = sourceOrder(6, "admin-search-six");
+        execute("UPDATE orders SET order_time='2026-01-01 12:00:00' WHERE id in (" + one + "," + two + ")");
+        execute("UPDATE orders SET number='search-123-five' WHERE id=" + one);
+        execute("UPDATE orders SET number='search-123-six',status=2,pay_status=1 WHERE id=" + two);
+        execute("UPDATE dish SET name='new-product-name',price=100 WHERE id=10");
+        JSONObject page = admin(get("/admin/order/conditionSearch").param("pageSize", "1")
+                .param("status", "0").param("userId", "999"), 1).getJSONObject("data");
+        assertEquals(2, page.getIntValue("total"));
+        assertEquals(two, page.getJSONArray("records").getJSONObject(0).getLongValue("id"));
+        JSONObject next = admin(get("/admin/order/conditionSearch").param("pageSize", "1").param("page", "2"), 1)
+                .getJSONObject("data").getJSONArray("records").getJSONObject(0);
+        assertEquals(one, next.getLongValue("id"));
+        assertEquals("fresh-dish×2", next.getString("orderDishes"));
+        assertEquals(new BigDecimal("25.00"), next.getJSONArray("orderDetailList").getJSONObject(0).getBigDecimal("amount"));
+        assertFalse(next.containsKey("requestId"));
+        JSONObject filtered = admin(get("/admin/order/conditionSearch").param("number", "123")
+                .param("phone", "139").param("status", "2")
+                .param("beginTime", "2026-01-01 12:00:00").param("endTime", "2026-01-01 12:00:00"), 1)
+                .getJSONObject("data");
+        assertEquals(1, filtered.getIntValue("total"));
+        assertEquals(two, filtered.getJSONArray("records").getJSONObject(0).getLongValue("id"));
+        JSONObject beyond = admin(get("/admin/order/conditionSearch").param("page", "100"), 1).getJSONObject("data");
+        assertEquals(2, beyond.getIntValue("total"));
+        assertTrue(beyond.getJSONArray("records").isEmpty());
+        assertEquals("fresh-dish", adminDetail(two).getJSONArray("orderDetailList").getJSONObject(0).getString("name"));
+        detail(5, two, 0); // 商家可跨用户查看，用户端仍然禁止越权。
+    }
+
+    @Test
+    void adminSearchTreatsSqlWildcardsLiterallyAndRejectsBadQueries() throws Exception {
+        long id = adminFixture(1, 0, 5);
+        adminFixture(1, 0, 6);
+        execute("UPDATE orders SET number='literal_!%value' WHERE id=" + id);
+        for (String search : List.of("_", "!", "%", "_!%")) {
+            JSONObject data = admin(get("/admin/order/conditionSearch").param("number", search), 1).getJSONObject("data");
+            assertEquals(1, data.getIntValue("total"));
+            assertEquals(id, data.getJSONArray("records").getJSONObject(0).getLongValue("id"));
+        }
+        assertEquals(0, admin(get("/admin/order/conditionSearch").param("number", "' OR 1=1 --"), 1)
+                .getJSONObject("data").getIntValue("total"));
+        admin(get("/admin/order/conditionSearch").param("page", "0"), 0);
+        admin(get("/admin/order/conditionSearch").param("pageSize", "101"), 0);
+        admin(get("/admin/order/conditionSearch").param("status", "7"), 0);
+        admin(get("/admin/order/conditionSearch").param("beginTime", "2026-02-01 00:00:00")
+                .param("endTime", "2026-01-01 00:00:00"), 0);
+        admin(get("/admin/order/details/999999"), 0);
+    }
+
+    @Test
+    void adminPaidLifecycleOnlyChangesStatusAndCompletionTimeAndRetriesAreSafe() throws Exception {
+        long id = sourceOrder(5, "admin-flow");
+        execute("UPDATE orders SET status=2,pay_status=1 WHERE id=" + id);
+        cart(5);
+        JSONObject before = adminDetail(id);
+        admin(put("/admin/order/confirm").contentType("application/json").content("{\"id\":" + id + ",\"status\":5}"), 1);
+        assertEquals(3, adminDetail(id).getIntValue("status"));
+        admin(put("/admin/order/confirm").contentType("application/json").content("{\"id\":" + id + "}"), 1);
+        admin(put("/admin/order/complete/" + id), 0); // 不能跳过派送。
+        admin(put("/admin/order/delivery/" + id), 1);
+        admin(put("/admin/order/delivery/" + id), 1);
+        admin(put("/admin/order/confirm").contentType("application/json").content("{\"id\":" + id + "}"), 0);
+        admin(put("/admin/order/complete/" + id), 1);
+        assertNotNull(adminDetail(id).getString("deliveryTime"));
+        execute("UPDATE orders SET delivery_time='2026-01-02 12:00:00' WHERE id=" + id);
+        admin(put("/admin/order/complete/" + id), 1);
+        JSONObject after = adminDetail(id);
+        assertEquals(5, after.getIntValue("status"));
+        assertEquals("2026-01-02 12:00", after.getString("deliveryTime"));
+        assertEquals(LocalDateTime.of(2026, 1, 2, 12, 0),
+                context.getBean(OrderMapper.class).getByIdForAdmin(id).getDeliveryTime());
+        assertEquals(1, after.getIntValue("payStatus"));
+        assertEquals(before.getBigDecimal("amount"), after.getBigDecimal("amount"));
+        assertEquals(before.getJSONArray("orderDetailList"), after.getJSONArray("orderDetailList"));
+        assertEquals(1, cartRows(5).size());
+        assertEquals(2, cartRows(5).getJSONObject(0).getIntValue("number"));
+    }
+
+    @Test
+    void adminRejectsUnpaidTransitionsAndDoesNotFakeRefundOnRejectionOrCancellation() throws Exception {
+        long id = adminFixture(2, 0, 5);
+        admin(put("/admin/order/confirm").contentType("application/json").content("{\"id\":" + id + "}"), 0);
+        execute("UPDATE orders SET status=3 WHERE id=" + id);
+        admin(put("/admin/order/delivery/" + id), 0);
+        execute("UPDATE orders SET status=4 WHERE id=" + id);
+        admin(put("/admin/order/complete/" + id), 0);
+        execute("UPDATE orders SET status=2,pay_status=1 WHERE id=" + id);
+        JSONObject before = adminDetail(id);
+        JSONObject rejected = admin(put("/admin/order/rejection").contentType("application/json")
+                .content("{\"id\":" + id + ",\"rejectionReason\":\"售罄\"}"), 0);
+        assertTrue(rejected.getString("msg").contains("暂未接入退款"));
+        JSONObject cancelled = admin(put("/admin/order/cancel").contentType("application/json")
+                .content("{\"id\":" + id + ",\"cancelReason\":\"售罄\"}"), 0);
+        assertTrue(cancelled.getString("msg").contains("暂未接入退款"));
+        assertEquals(before, adminDetail(id));
+        admin(put("/admin/order/rejection").contentType("application/json")
+                .content("{\"id\":999999,\"rejectionReason\":\"售罄\"}"), 0);
+    }
+
+    @Test
+    void adminCancellationPreservesCartDetailsAndFirstReasonAndUserCancellationCanReplay() throws Exception {
+        long id = sourceOrder(6, "admin-cancel");
+        cart(6);
+        JSONObject before = adminDetail(id);
+        admin(put("/admin/order/cancel").contentType("application/json")
+                .content("{\"id\":" + id + ",\"cancelReason\":\" 商品售罄 \"}"), 1);
+        execute("UPDATE orders SET cancel_time='2026-01-01 12:00:00' WHERE id=" + id);
+        admin(put("/admin/order/cancel").contentType("application/json")
+                .content("{\"id\":" + id + ",\"cancelReason\":\"第二次原因\"}"), 1);
+        cancel(6, id, null, 1);
+        JSONObject after = adminDetail(id);
+        assertEquals(6, after.getIntValue("status"));
+        assertEquals(0, after.getIntValue("payStatus"));
+        assertEquals("商品售罄", after.getString("cancelReason"));
+        assertEquals("2026-01-01 12:00", after.getString("cancelTime"));
+        assertEquals(LocalDateTime.of(2026, 1, 1, 12, 0),
+                context.getBean(OrderMapper.class).getByIdForAdmin(id).getCancelTime());
+        assertEquals(before.getJSONArray("orderDetailList"), after.getJSONArray("orderDetailList"));
+        assertEquals(1, cartRows(6).size());
+    }
+
+    @Test
+    void concurrentAdminCompletionRequestsPreserveOneResultAndNeverRegressState() throws Exception {
+        long id = adminFixture(4, 1, 5);
+        var executor = Executors.newFixedThreadPool(6);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            List<Future<Integer>> futures = new ArrayList<>();
+            for (int i = 0; i < 6; i++) {
+                futures.add(executor.submit(() -> {
+                    start.await();
+                    return admin(put("/admin/order/complete/" + id), 1).getIntValue("code");
+                }));
+            }
+            start.countDown();
+            for (Future<Integer> future : futures) { assertEquals(1, future.get(20, TimeUnit.SECONDS)); }
+            JSONObject completed = adminDetail(id);
+            assertEquals(5, completed.getIntValue("status"));
+            assertNotNull(completed.getString("deliveryTime"));
+            admin(put("/admin/order/delivery/" + id), 0);
+            assertEquals(completed, adminDetail(id));
+        } finally {
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void concurrentUserAndAdminCancellationKeepOneReasonWithoutDeadlock() throws Exception {
+        long id = sourceOrder(5, "admin-user-cancel-race");
+        var executor = Executors.newFixedThreadPool(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            Future<?> user = executor.submit(() -> {
+                start.await();
+                cancel(5, id, null, 1);
+                return null;
+            });
+            Future<?> merchant = executor.submit(() -> {
+                start.await();
+                return admin(put("/admin/order/cancel").contentType("application/json")
+                        .content("{\"id\":" + id + ",\"cancelReason\":\"商家主动取消\"}"), 1);
+            });
+            start.countDown(); user.get(20, TimeUnit.SECONDS); merchant.get(20, TimeUnit.SECONDS);
+            JSONObject after = adminDetail(id);
+            assertEquals(6, after.getIntValue("status"));
+            assertTrue(List.of("用户主动取消", "商家主动取消").contains(after.getString("cancelReason")));
+            assertNotNull(after.getString("cancelTime"));
+        } finally {
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
     @Configuration
     @EnableWebMvc
     @EnableTransactionManagement
     @Import({WebMvcConfiguration.class, JwtTokenAdminInterceptor.class, JwtTokenUserInterceptor.class,
-            GlobalExceptionHandler.class, OrderServiceImpl.class, com.sky.controller.user.OrderController.class})
+            GlobalExceptionHandler.class, OrderServiceImpl.class, AdminOrderServiceImpl.class, ShoppingCartServiceImpl.class,
+            com.sky.controller.admin.OrderController.class,
+            com.sky.controller.user.OrderController.class, com.sky.controller.user.ShoppingCartController.class})
     static class TestConfig { }
 }

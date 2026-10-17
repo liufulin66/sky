@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.sky.mapper.ReportMapper">
+    <select id="dailyOrders" resultType="com.sky.dto.ReportDailyOrderDTO">
+        select date(order_time) as date,
+               coalesce(sum(case when status = 5 and pay_status = 1 then amount else 0 end), 0) as turnover,
+               count(*) as order_count,
+               sum(case when status = 5 and pay_status = 1 then 1 else 0 end) as valid_order_count
+        from orders
+        where order_time &gt;= #{begin} and order_time &lt; #{end}
+        group by date(order_time)
+        order by date asc
+    </select>
+
+    <!-- 基数和每日新增在同一SQL中读取；不把查询范围之前每天的数据全部返回Java。 -->
+    <select id="dailyUsers" resultType="com.sky.dto.ReportDailyUserDTO">
+        select null as date, count(*) as new_user_count from `user` where create_time &lt; #{begin}
+        union all
+        select date(create_time) as date, count(*) as new_user_count
+        from `user` where create_time &gt;= #{begin} and create_time &lt; #{end}
+        group by date(create_time)
+    </select>
+
+    <!-- MySQL8窗口函数：按类型+id分组统计份数，按成交时间、订单id、明细id选择最新名称。 -->
+    <select id="top10" resultType="com.sky.dto.ReportSalesDTO">
+        with ranked_sales as (
+            select case when d.dish_id is not null then 1 else 2 end as product_type,
+                   coalesce(d.dish_id, d.setmeal_id) as product_id,
+                   d.name,
+                   sum(d.number) over (partition by d.dish_id, d.setmeal_id) as number,
+                   row_number() over (
+                       partition by d.dish_id, d.setmeal_id
+                       order by o.order_time desc, o.id desc, d.id desc
+                   ) as snapshot_rank
+            from orders o inner join order_detail d on o.id = d.order_id
+            where o.order_time &gt;= #{begin} and o.order_time &lt; #{end}
+              and o.status = 5 and o.pay_status = 1
+              and d.number &gt; 0
+              and ((d.dish_id &gt; 0 and d.setmeal_id is null)
+                   or (d.setmeal_id &gt; 0 and d.dish_id is null))
+        )
+        select product_type, product_id, name, number from ranked_sales
+        where snapshot_rank = 1
+        order by number desc, product_type asc, product_id asc
+        limit 10
+    </select>
+</mapper>

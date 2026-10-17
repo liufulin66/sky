@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.sky.mapper.WorkspaceMapper">
+    <!-- 一个SQL取得订单聚合和新增用户数；空订单表时也保留独立的用户统计结果。 -->
+    <select id="businessData" resultType="com.sky.dto.WorkspaceBusinessDataDTO">
+        select coalesce(sum(case when status = 5 and pay_status = 1 then amount else 0 end), 0) as turnover,
+               coalesce(sum(case when status = 5 and pay_status = 1 then 1 else 0 end), 0) as valid_order_count,
+               count(*) as all_orders,
+               (select count(*) from `user` where create_time &gt;= #{begin} and create_time &lt; #{end}) as new_users
+        from orders where order_time &gt;= #{begin} and order_time &lt; #{end}
+    </select>
+
+    <!-- 全部数量包含待付款和派送中，因此未必等于页面另外四项数量之和。 -->
+    <select id="overviewOrders" resultType="com.sky.vo.OrderOverViewVO">
+        select coalesce(sum(case when status = 2 then 1 else 0 end), 0) as waiting_orders,
+               coalesce(sum(case when status = 3 then 1 else 0 end), 0) as delivered_orders,
+               coalesce(sum(case when status = 5 then 1 else 0 end), 0) as completed_orders,
+               coalesce(sum(case when status = 6 then 1 else 0 end), 0) as cancelled_orders,
+               count(*) as all_orders
+        from orders where order_time &gt;= #{begin} and order_time &lt; #{end}
+    </select>
+
+    <!-- 管理端统计商品自身的配置状态，不套用用户端分类、套餐菜品等可售校验。 -->
+    <select id="overviewDishes" resultType="com.sky.vo.DishOverViewVO">
+        select coalesce(sum(case when status = 1 then 1 else 0 end), 0) as sold,
+               coalesce(sum(case when status = 0 then 1 else 0 end), 0) as discontinued
+        from dish
+    </select>
+
+    <select id="overviewSetmeals" resultType="com.sky.vo.SetmealOverViewVO">
+        select coalesce(sum(case when status = 1 then 1 else 0 end), 0) as sold,
+               coalesce(sum(case when status = 0 then 1 else 0 end), 0) as discontinued
+        from setmeal
+    </select>
+</mapper>

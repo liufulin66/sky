@@ -11,4 +11,8 @@ public interface OrderService {
     PageResult<OrderVO> historyOrders(Integer page, Integer pageSize, Integer status);
 
     OrderVO orderDetail(Long id);
+
+    void cancel(Long id, String cancelReason);
+
+    void repetition(Long id, String requestId);
 }

@@ -1,6 +1,8 @@
-# 用户端下单与订单查询
+# 用户端下单、查询、取消与再来一单
 
-本次实现提交订单、历史订单分页和订单详情。全部要求 `authentication: <用户JWT>`，用户身份只取 BaseContext，客户端不能指定订单用户、订单号或支付状态。
+已实现提交订单、历史订单分页、订单详情、未付款取消和再来一单。全部要求 `authentication: <用户JWT>`，用户身份只取 BaseContext，客户端不能指定订单用户、订单号或支付状态。
+
+商家处理订单的8个接口、状态流转及暂不接退款的边界见 [商家端订单管理](admin-orders.md)。
 
 直连 `http://localhost:8080`；当前 Nginx 为 `http://localhost:90`，用户端路径不加 `/api`。成功返回 `code=1`；业务失败返回 `code=0` 和 `msg`；JWT无效返回HTTP401。
 
@@ -12,6 +14,8 @@
 
 已有数据库和新导入的基线数据库都要执行该迁移。不要用包含DROP TABLE的完整建表文件覆盖已有业务库；迁移执行成功后不要重复执行。
 
+再来一单另外依赖 [2026-10-16-order-repetition.sql](../sql/migrations/2026-10-16-order-repetition.sql)，只新增成功操作记录表 `order_repetition`，按“用户+请求ID”保存来源订单，防止超时重试重复加购。已执行10月15日迁移的数据库，只需补执行这份新迁移；不需要重复执行旧迁移。取消接口复用订单现有字段，不依赖新增记录表。应用不会自动执行任何业务库迁移。
+
 ## 接口
 
 | 方法和路径 | 参数 | 成功 data |
@@ -19,6 +23,8 @@
 | `POST /user/order/submit` | JSON，下文示例 | id、orderNumber、orderAmount、orderTime |
 | `GET /user/order/historyOrders` | page默认1，pageSize默认10，status可选 | total、records（OrderVO数组） |
 | `GET /user/order/orderDetail/{id}` | 正整数订单id | OrderVO，包含orderDetailList |
+| `PUT /user/order/cancel/{id}` | 路径订单id，可选JSON：`{"cancelReason":"不想要了"}` | null |
+| `POST /user/order/repetition/{id}` | 路径来源订单id，JSON：`{"requestId":"repeat-uuid"}` | null |
 
 历史订单按下单时间、id降序。page必须为正整数；pageSize为1～100；status支持实体定义的1～6，不传查询全部。空结果records为[]，超出页数时保留实际total。列表与详情只查询当前用户，访问不存在或他人订单统一提示“订单不存在或无权查看”。
 
@@ -76,10 +82,47 @@
 1. 刷新地址和购物车，展示本次金额。
 2. 为本次提交生成requestId，发送表单；超时后按原表单和requestId重试。
 3. 成功后保存订单id/订单号，刷新购物车，进入待付款订单页面。
-4. 通过历史分页或详情查看订单。当前不提供真实支付、取消、退款、再来一单或商家接单接口。
+4. 通过历史分页或详情查看订单，可取消未付款订单或将历史商品再次加入购物车。当前不提供真实支付、退款或商家接单接口。
+
+## 取消未付款订单
+
+```http
+PUT /user/order/cancel/100
+Content-Type: application/json
+authentication: <用户JWT>
+
+{"cancelReason":"暂时不需要了"}
+```
+
+- 订单id只取路径，忽略请求体中的id。请求体可不传，也可传null或空对象；原因去掉首尾空白，为空时记录“用户主动取消”，最长255字符。
+- 只允许本人待付款status=1且未支付payStatus=0的订单。不存在或属于他人时统一提示“订单不存在或无权操作”。已支付或其他不可取消状态返回code=0，不调用退款。
+- 事务中先锁用户行，再用SELECT FOR UPDATE读取并锁定本人订单，条件UPDATE再次限制订单id、用户、status=1和pay_status=0。更新status=6、cancel_reason、cancel_time，保留主表及明细，不恢复或清空购物车，不改金额和支付状态。
+- 已取消且未支付时重复调用成功，不覆盖第一次的取消原因和时间。JSON格式错误、非数字或非正数id、过长原因返回code=0。
+- 当前没有真实支付。以后接入支付时，还须处理关闭支付单、支付结果核对及迟到通知；数据库条件更新不能替代外部支付协调。
+
+## 再来一单
+
+```http
+POST /user/order/repetition/100
+Content-Type: application/json
+authentication: <用户JWT>
+
+{"requestId":"repeat-589c0f68-2ab1-455b-82e0-2cbb29998e58"}
+```
+
+- 来源订单为本人的任意状态已有订单，包括待付款、已完成和已取消。不创建新订单，不复制收货地址和支付状态；只将历史商品、口味和份数追加到当前购物车，成功后小程序重新调用购物车list。
+- 保留原购物车。同一用户、同一商品及口味合并数量，不同口味分开；一次按历史份数增加，不逐份调用HTTP加购接口。
+- 复用现有购物车加购校验：菜品或套餐id二选一、正整数，口味仅做现有字符串归一化和长度校验，不校验其是否仍属于当前口味选项；套餐不得填写菜品口味。名称、图片、单价重新查MySQL，合并条目的这些字段也刷新为当前资料，绝不沿用历史成交价。
+- 任一历史商品下架、删除、所属分类禁用、套餐不可售、数量异常或合并数量溢出，整次操作失败并回滚，原购物车数量和价格等字段保持原样。商品加购校验失败时提示对应历史商品名称及原因。不跳过失败商品。
+- 与已有加购相同，打烊允许再来一单；真正提交订单仍须检查营业状态、商品可售性和总额。
+- requestId必填，格式与提交订单相同，为1～64位字母、数字、下划线或短横线。它属于独立的“再来一单”操作，不使用来源订单的旧下单requestId；同一次操作的重试保持该值，主动再追加一次需生成新值。
+- 服务端先锁用户行，再查 `order_repetition`。同一用户相同requestId和来源订单重复请求直接成功，不再检查当前商品或追加购物车；购物车随后被修改、清空或结算，也不会因重试重新加入。
+- 相同requestId改用于其他来源订单时拒绝；不同用户可使用相同requestId。操作记录表的联合主键是最终唯一性约束。
+- 所有加购与成功操作记录在同一事务提交；任一步失败都回滚，失败的requestId不占用，可以在修复问题后按原请求重试。成功记录不设置短TTL，避免TTL到期后旧重试再次追加。
+- 这次不涉及真实支付、退款或库存恢复。
 
 ## 验证
 
 常规测试：`mvn -o -pl sky-server -am test`。
 
-本地 MySQL 集成测试：`mvn -o -pl sky-server -am test '-Dorder.mysql.tests=true'`。读取本地application-dev.yml，只创建随机ord_test_前缀测试表；从基线建表文件提取CREATE语句并执行生产迁移，再加载生产Mapper和真实Spring事务/HTTP分派。验证迁移约束、重算价格、用户隔离、快照、并发重试、事务回滚和分页；结束后清理自身测试表，测试不修改业务表或已有订单。营业状态用测试替身隔离，不依赖Redis服务。
+本地 MySQL 集成测试：`mvn -o -pl sky-server -am test '-Dorder.mysql.tests=true'`。读取本地application-dev.yml，只创建随机ord_test_前缀测试表；从基线建表文件提取CREATE语句并执行两份生产迁移，再加载生产Mapper和真实Spring事务/HTTP分派。验证迁移约束、重算价格、用户隔离、快照、并发重试、事务回滚、分页、未付款取消和再来一单。支付竞争测试仅在隔离表模拟条件UPDATE，不提供业务模拟付款接口。结束后清理自身测试表，不修改业务表或已有订单。营业状态用测试替身隔离，不依赖Redis服务。

@@ -1,6 +1,8 @@
 package com.sky.controller.user;
 
 import com.sky.dto.OrdersSubmitDTO;
+import com.sky.dto.OrdersCancelDTO;
+import com.sky.dto.OrdersRepetitionDTO;
 import com.sky.result.PageResult;
 import com.sky.result.Result;
 import com.sky.service.OrderService;
@@ -8,12 +10,14 @@ import com.sky.vo.OrderSubmitVO;
 import com.sky.vo.OrderVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -27,8 +31,9 @@ public class OrderController {
     private OrderService orderService;
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
-    public Result<Void> handleInvalidBody(HttpMessageNotReadableException ex) {
-        return Result.error("下单请求体缺失或格式错误");
+    public Result<Void> handleInvalidBody(HttpMessageNotReadableException ex, HttpServletRequest request) {
+        return Result.error(request.getRequestURI().endsWith("/submit")
+                ? "下单请求体缺失或格式错误" : "订单请求体缺失或格式错误");
     }
 
     @PostMapping("/submit")
@@ -50,5 +55,20 @@ public class OrderController {
     @Operation(summary = "查询本人订单详情和成交快照")
     public Result<OrderVO> orderDetail(@PathVariable Long id) {
         return Result.success(orderService.orderDetail(id));
+    }
+
+    @PutMapping("/cancel/{id}")
+    @Operation(summary = "取消本人未付款订单，重复取消保留原记录")
+    public Result<Void> cancel(@PathVariable Long id, @RequestBody(required = false) OrdersCancelDTO dto) {
+        // 订单id只取路径，忽略请求体中可能伪造的id。
+        orderService.cancel(id, dto == null ? null : dto.getCancelReason());
+        return Result.success();
+    }
+
+    @PostMapping("/repetition/{id}")
+    @Operation(summary = "历史商品追加到购物车，相同requestId只追加一次")
+    public Result<Void> repetition(@PathVariable Long id, @RequestBody OrdersRepetitionDTO dto) {
+        orderService.repetition(id, dto.getRequestId());
+        return Result.success();
     }
 }

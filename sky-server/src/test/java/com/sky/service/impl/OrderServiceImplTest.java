@@ -10,10 +10,12 @@ import com.sky.entity.OrderDetail;
 import com.sky.entity.Orders;
 import com.sky.entity.ShoppingCart;
 import com.sky.exception.OrderBusinessException;
+import com.sky.exception.ShoppingCartBusinessException;
 import com.sky.exception.UserNotLoginException;
 import com.sky.mapper.*;
 import com.sky.properties.OrderProperties;
 import com.sky.service.ShopService;
+import com.sky.service.ShoppingCartService;
 import com.sky.vo.OrderVO;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,6 +43,8 @@ class OrderServiceImplTest {
     private ShopService shop;
     private OrderProperties fees;
     private Orders inserted;
+    private OrderRepetitionMapper repetitions;
+    private ShoppingCartService shoppingCartService;
 
     @BeforeEach
     void setUp() {
@@ -54,6 +58,9 @@ class OrderServiceImplTest {
         users = mock(UserMapper.class);
         shop = mock(ShopService.class);
         fees = new OrderProperties();
+        repetitions = mock(OrderRepetitionMapper.class);
+        shoppingCartService = mock(ShoppingCartService.class);
+        when(repetitions.getOrderIdByRequestId(anyLong(), anyString())).thenReturn(null);
         ReflectionTestUtils.setField(service, "orderMapper", orders);
         ReflectionTestUtils.setField(service, "orderDetailMapper", details);
         ReflectionTestUtils.setField(service, "shoppingCartMapper", carts);
@@ -63,6 +70,8 @@ class OrderServiceImplTest {
         ReflectionTestUtils.setField(service, "userMapper", users);
         ReflectionTestUtils.setField(service, "shopService", shop);
         ReflectionTestUtils.setField(service, "orderProperties", fees);
+        ReflectionTestUtils.setField(service, "orderRepetitionMapper", repetitions);
+        ReflectionTestUtils.setField(service, "shoppingCartService", shoppingCartService);
         BaseContext.setCurrentId(5L);
         when(users.lockById(5L)).thenReturn(5L);
         when(addresses.getByIdAndUserId(1L, 5L)).thenReturn(AddressBook.builder().id(1L).userId(5L)
@@ -251,5 +260,96 @@ class OrderServiceImplTest {
         when(users.lockById(999L)).thenReturn(null);
         assertThrows(UserNotLoginException.class, () -> service.submit(form()));
         noOrderWritten();
+    }
+
+    @Test
+    void cancelUsesDefaultReasonAndConditionalUpdateAfterLocking() {
+        when(orders.getByIdAndUserIdForUpdate(9L, 5L)).thenReturn(Orders.builder().id(9L).status(1).payStatus(0).build());
+        when(orders.cancelUnpaid(eq(9L), eq(5L), anyString(), any())).thenReturn(1);
+        service.cancel(9L, "   ");
+        var sequence = inOrder(users, orders);
+        sequence.verify(users).lockById(5L);
+        sequence.verify(orders).getByIdAndUserIdForUpdate(9L, 5L);
+        sequence.verify(orders).cancelUnpaid(eq(9L), eq(5L), eq("用户主动取消"), argThat(t -> t.getNano() == 0));
+        verifyNoInteractions(carts, details, shop);
+    }
+
+    @Test
+    void cancelledUnpaidOrderIsIdempotentAndPaidOrdersAreRejected() {
+        when(orders.getByIdAndUserIdForUpdate(9L, 5L)).thenReturn(Orders.builder().id(9L).status(6).payStatus(0).build());
+        service.cancel(9L, "第二次原因");
+        verify(orders, never()).cancelUnpaid(anyLong(), anyLong(), anyString(), any());
+        for (int status : new int[]{1, 2, 3, 4, 5, 6}) {
+            when(orders.getByIdAndUserIdForUpdate(9L, 5L)).thenReturn(Orders.builder().id(9L).status(status).payStatus(1).build());
+            assertThrows(OrderBusinessException.class, () -> service.cancel(9L, null));
+        }
+    }
+
+    @Test
+    void cancelRejectsForeignOrdersInvalidReasonsAndConcurrentStateChanges() {
+        assertThrows(OrderBusinessException.class, () -> service.cancel(99L, null));
+        assertThrows(OrderBusinessException.class, () -> service.cancel(9L, "x".repeat(256)));
+        when(orders.getByIdAndUserIdForUpdate(9L, 5L)).thenReturn(Orders.builder().id(9L).status(1).payStatus(0).build());
+        when(orders.cancelUnpaid(eq(9L), eq(5L), anyString(), any())).thenReturn(0);
+        assertThrows(OrderBusinessException.class, () -> service.cancel(9L, null));
+    }
+
+    @Test
+    void repetitionReusesQuantityAwareCartServiceAndRecordsOnlyAfterSuccess() {
+        OrderVO order = new OrderVO();
+        order.setId(9L);
+        order.setStatus(1); // 任意状态的本人订单均可再来一单。
+        when(orders.getByIdAndUserId(9L, 5L)).thenReturn(order);
+        when(details.listByOrderIdsAndUserId(List.of(9L), 5L)).thenReturn(List.of(
+                OrderDetail.builder().dishId(10L).dishFlavor("微辣").number(3).name("历史菜名").build()));
+        service.repetition(9L, "repeat-1");
+        var sequence = inOrder(users, repetitions, orders, shoppingCartService);
+        sequence.verify(users).lockById(5L);
+        sequence.verify(repetitions).getOrderIdByRequestId(5L, "repeat-1");
+        sequence.verify(orders).getByIdAndUserId(9L, 5L);
+        sequence.verify(shoppingCartService).add(argThat(d -> d.getDishId().equals(10L) && "微辣".equals(d.getDishFlavor())), eq(3));
+        sequence.verify(repetitions).insert(eq(5L), eq("repeat-1"), eq(9L), any());
+        verifyNoInteractions(shop);
+        verify(orders, never()).insert(any());
+    }
+
+    @Test
+    void repetitionReplayDoesNotReadOrderOrModifyCartAndOtherSourceIsRejected() {
+        when(repetitions.getOrderIdByRequestId(5L, "repeat-1")).thenReturn(9L);
+        service.repetition(9L, "repeat-1");
+        assertThrows(OrderBusinessException.class, () -> service.repetition(10L, "repeat-1"));
+        verifyNoInteractions(shoppingCartService, orders, details, shop);
+        verify(repetitions, never()).insert(anyLong(), anyString(), anyLong(), any());
+    }
+
+    @Test
+    void repetitionRejectsMissingForeignAndBrokenOrdersWithoutSuccessRecord() {
+        assertThrows(OrderBusinessException.class, () -> service.repetition(99L, "repeat-1"));
+        when(orders.getByIdAndUserId(9L, 5L)).thenReturn(new OrderVO());
+        when(details.listByOrderIdsAndUserId(List.of(9L), 5L)).thenReturn(List.of());
+        assertThrows(OrderBusinessException.class, () -> service.repetition(9L, "repeat-1"));
+        when(details.listByOrderIdsAndUserId(List.of(9L), 5L)).thenReturn(List.of(OrderDetail.builder().number(0).build()));
+        assertThrows(OrderBusinessException.class, () -> service.repetition(9L, "repeat-1"));
+        when(details.listByOrderIdsAndUserId(List.of(9L), 5L)).thenReturn(List.of(
+                OrderDetail.builder().dishId(10L).name("已停售的菜").number(2).build()));
+        doThrow(new ShoppingCartBusinessException("菜品不存在或已不可售")).when(shoppingCartService).add(any(), eq(2));
+        assertTrue(assertThrows(OrderBusinessException.class, () -> service.repetition(9L, "repeat-1"))
+                .getMessage().contains("已停售的菜"));
+        verify(repetitions, never()).insert(anyLong(), anyString(), anyLong(), any());
+    }
+
+    @Test
+    void cancellationAndRepetitionRejectInvalidIdentityIdsAndRequestKeys() {
+        for (Long id : new Long[]{null, 0L, -1L}) {
+            assertThrows(OrderBusinessException.class, () -> service.cancel(id, null));
+            assertThrows(OrderBusinessException.class, () -> service.repetition(id, "repeat-1"));
+        }
+        for (String key : new String[]{null, "", "a b", "x".repeat(65)}) {
+            assertThrows(OrderBusinessException.class, () -> service.repetition(9L, key));
+        }
+        verifyNoInteractions(users, orders, repetitions);
+        BaseContext.removeCurrentId();
+        assertThrows(UserNotLoginException.class, () -> service.cancel(9L, null));
+        assertThrows(UserNotLoginException.class, () -> service.repetition(9L, "repeat-1"));
     }
 }

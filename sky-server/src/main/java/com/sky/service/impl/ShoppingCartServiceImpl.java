@@ -35,7 +35,17 @@ public class ShoppingCartServiceImpl implements ShoppingCartService {
     @Override
     @Transactional
     public void add(ShoppingCartDTO dto) {
+        add(dto, 1);
+    }
+
+    @Override
+    @Transactional
+    public void add(ShoppingCartDTO dto, int number) {
+        if (number <= 0) {
+            throw new ShoppingCartBusinessException("添加数量必须为正整数");
+        }
         ShoppingCart variant = buildVariant(dto);
+        variant.setNumber(number);
         lockUser(variant.getUserId());
 
         // 价格、名称、图片只从后端商品数据读取；可见性与商品浏览接口一致。
@@ -63,12 +73,13 @@ public class ShoppingCartServiceImpl implements ShoppingCartService {
 
         ShoppingCart existing = shoppingCartMapper.getByVariant(variant);
         if (existing == null) {
-            variant.setNumber(1);
             variant.setCreateTime(LocalDateTime.now());
             shoppingCartMapper.insert(variant);
         } else {
             variant.setId(existing.getId());
-            if (shoppingCartMapper.incrementAndRefresh(variant) != 1) {
+            int changed = number == 1 ? shoppingCartMapper.incrementAndRefresh(variant)
+                    : shoppingCartMapper.incrementByAndRefresh(variant);
+            if (changed != 1) {
                 throw new ShoppingCartBusinessException("购物车数量异常或已达上限");
             }
         }

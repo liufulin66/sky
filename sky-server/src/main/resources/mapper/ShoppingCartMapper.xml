@@ -32,6 +32,13 @@
         where id = #{id} and user_id = #{userId} and number > 1
     </update>
 
+    <update id="incrementByAndRefresh">
+        update shopping_cart
+        set number = number + #{number}, name = #{name}, image = #{image}, amount = #{amount}
+        where id = #{id} and user_id = #{userId}
+          and #{number} > 0 and number > 0 and number &lt;= 2147483647 - #{number}
+    </update>
+
     <delete id="deleteByIdAndUserId">
         delete from shopping_cart where id = #{id} and user_id = #{userId}
     </delete>

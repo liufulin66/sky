@@ -5,6 +5,7 @@ import com.github.pagehelper.PageHelper;
 import com.sky.constant.MessageConstant;
 import com.sky.context.BaseContext;
 import com.sky.dto.OrdersSubmitDTO;
+import com.sky.dto.ShoppingCartDTO;
 import com.sky.entity.AddressBook;
 import com.sky.entity.Dish;
 import com.sky.entity.OrderDetail;
@@ -12,11 +13,13 @@ import com.sky.entity.Orders;
 import com.sky.entity.Setmeal;
 import com.sky.entity.ShoppingCart;
 import com.sky.exception.OrderBusinessException;
+import com.sky.exception.ShoppingCartBusinessException;
 import com.sky.exception.UserNotLoginException;
 import com.sky.mapper.AddressBookMapper;
 import com.sky.mapper.DishMapper;
 import com.sky.mapper.OrderDetailMapper;
 import com.sky.mapper.OrderMapper;
+import com.sky.mapper.OrderRepetitionMapper;
 import com.sky.mapper.SetmealMapper;
 import com.sky.mapper.ShoppingCartMapper;
 import com.sky.mapper.UserMapper;
@@ -24,6 +27,7 @@ import com.sky.properties.OrderProperties;
 import com.sky.result.PageResult;
 import com.sky.service.OrderService;
 import com.sky.service.ShopService;
+import com.sky.service.ShoppingCartService;
 import com.sky.vo.OrderSubmitVO;
 import com.sky.vo.OrderVO;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -58,6 +62,8 @@ public class OrderServiceImpl implements OrderService {
     @Autowired private UserMapper userMapper;
     @Autowired private ShopService shopService;
     @Autowired private OrderProperties orderProperties;
+    @Autowired private OrderRepetitionMapper orderRepetitionMapper;
+    @Autowired private ShoppingCartService shoppingCartService;
 
     @Override
     @Transactional
@@ -157,6 +163,87 @@ public class OrderServiceImpl implements OrderService {
         }
         attachDetails(List.of(order), userId);
         return order;
+    }
+
+    @Override
+    @Transactional
+    public void cancel(Long id, String cancelReason) {
+        Long userId = currentUserId();
+        requireOrderId(id);
+        String reason = optionalText(cancelReason, "取消原因", 255);
+        lockUser(userId);
+        // 当前读并锁订单行，使取消判断和状态更新处于同一个锁保护范围。
+        Orders order = orderMapper.getByIdAndUserIdForUpdate(id, userId);
+        if (order == null) {
+            throw error("订单不存在或无权操作");
+        }
+        if (Orders.CANCELLED.equals(order.getStatus()) && Orders.UN_PAID.equals(order.getPayStatus())) {
+            return; // 不覆盖第一次取消的原因和时间。
+        }
+        if (!Orders.PENDING_PAYMENT.equals(order.getStatus()) || !Orders.UN_PAID.equals(order.getPayStatus())) {
+            throw error("仅支持取消待付款且未支付的订单");
+        }
+        if (orderMapper.cancelUnpaid(id, userId, reason == null ? "用户主动取消" : reason,
+                LocalDateTime.now().withNano(0)) != 1) {
+            throw error("订单状态已变化，请刷新后重试");
+        }
+    }
+
+    @Override
+    @Transactional
+    public void repetition(Long id, String requestId) {
+        Long userId = currentUserId();
+        requireOrderId(id);
+        requireRequestId(requestId);
+        lockUser(userId);
+        Long previousOrderId = orderRepetitionMapper.getOrderIdByRequestId(userId, requestId);
+        if (previousOrderId != null) {
+            if (!id.equals(previousOrderId)) {
+                throw error("requestId已用于其他订单的再来一单，请生成新的requestId");
+            }
+            return; // 购物车随后可能被修改或结算，重试不能再次追加。
+        }
+        if (orderMapper.getByIdAndUserId(id, userId) == null) {
+            throw error("订单不存在或无权操作");
+        }
+        List<OrderDetail> details = orderDetailMapper.listByOrderIdsAndUserId(List.of(id), userId);
+        if (details.isEmpty()) {
+            throw error("原订单没有商品明细，无法再来一单");
+        }
+        for (OrderDetail detail : details) {
+            if (detail.getNumber() == null || detail.getNumber() <= 0) {
+                throw error("原订单商品数量异常，无法再来一单");
+            }
+            ShoppingCartDTO item = new ShoppingCartDTO();
+            item.setDishId(detail.getDishId());
+            item.setSetmealId(detail.getSetmealId());
+            item.setDishFlavor(detail.getDishFlavor());
+            try {
+                // 跨Service调用经过事务代理，加入当前事务；不按份循环调用加购接口。
+                shoppingCartService.add(item, detail.getNumber());
+            } catch (ShoppingCartBusinessException ex) {
+                String name = detail.getName() == null ? "ID=" + detail.getId() : detail.getName();
+                throw error("原订单商品“" + name + "”无法加入：" + ex.getMessage());
+            }
+        }
+        // 操作记录和购物车在同一事务提交；记录失败也会回滚此前所有加购。
+        orderRepetitionMapper.insert(userId, requestId, id, LocalDateTime.now().withNano(0));
+    }
+
+    private void requireOrderId(Long id) {
+        if (id == null || id <= 0) { throw error("订单id必须为正整数"); }
+    }
+
+    private void requireRequestId(String requestId) {
+        if (requestId == null || !requestId.matches("[A-Za-z0-9_-]{1,64}")) {
+            throw error("requestId必须为1到64位字母、数字、下划线或短横线");
+        }
+    }
+
+    private void lockUser(Long userId) {
+        if (userMapper.lockById(userId) == null) {
+            throw new UserNotLoginException(MessageConstant.USER_NOT_LOGIN);
+        }
     }
 
     private void attachDetails(List<OrderVO> orders, Long userId) {

@@ -16,6 +16,8 @@ public interface ShoppingCartMapper {
 
     int incrementAndRefresh(ShoppingCart cart);
 
+    int incrementByAndRefresh(ShoppingCart cart);
+
     int decrement(@Param("id") Long id, @Param("userId") Long userId);
 
     int deleteByIdAndUserId(@Param("id") Long id, @Param("userId") Long userId);

@@ -1,6 +1,45 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.sky.mapper.OrderMapper">
+    <select id="searchForAdmin" resultType="com.sky.vo.OrderVO">
+        select * from orders
+        <where>
+            <if test="number != null">and number like concat('%', #{number}, '%') escape '!'</if>
+            <if test="phone != null">and phone like concat('%', #{phone}, '%') escape '!'</if>
+            <if test="status != null">and status = #{status}</if>
+            <if test="beginTime != null">and order_time &gt;= #{beginTime}</if>
+            <if test="endTime != null">and order_time &lt;= #{endTime}</if>
+        </where>
+        order by order_time desc, id desc
+    </select>
+
+    <select id="getByIdForAdmin" resultType="com.sky.vo.OrderVO">
+        select * from orders where id = #{id}
+    </select>
+
+    <select id="getByIdForUpdate" resultType="com.sky.entity.Orders">
+        select * from orders where id = #{id} for update
+    </select>
+
+    <!-- 无日期限制；一次聚合返回三个待处理状态的数量，空表返回0。 -->
+    <select id="statisticsForAdmin" resultType="com.sky.vo.OrderStatisticsVO">
+        select coalesce(sum(case when status = 2 then 1 else 0 end), 0) as to_be_confirmed,
+               coalesce(sum(case when status = 3 then 1 else 0 end), 0) as confirmed,
+               coalesce(sum(case when status = 4 then 1 else 0 end), 0) as delivery_in_progress
+        from orders where status in (2, 3, 4)
+    </select>
+
+    <update id="advancePaidStatus">
+        update orders set status = #{toStatus}
+        <if test="deliveryTime != null">, delivery_time = #{deliveryTime}</if>
+        where id = #{id} and status = #{fromStatus} and pay_status = 1
+    </update>
+
+    <update id="cancelUnpaidForAdmin">
+        update orders set status = 6, cancel_reason = #{reason}, cancel_time = #{cancelTime}
+        where id = #{id} and status = 1 and pay_status = 0
+    </update>
+
     <select id="getByRequestId" resultType="com.sky.entity.Orders">
         select * from orders where user_id = #{userId} and request_id = #{requestId}
     </select>
@@ -26,4 +65,13 @@
     <select id="getByIdAndUserId" resultType="com.sky.vo.OrderVO">
         select * from orders where id = #{id} and user_id = #{userId}
     </select>
+
+    <select id="getByIdAndUserIdForUpdate" resultType="com.sky.entity.Orders">
+        select * from orders where id = #{id} and user_id = #{userId} for update
+    </select>
+
+    <update id="cancelUnpaid">
+        update orders set status = 6, cancel_reason = #{reason}, cancel_time = #{cancelTime}
+        where id = #{id} and user_id = #{userId} and status = 1 and pay_status = 0
+    </update>
 </mapper>
